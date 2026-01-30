@@ -1,7 +1,9 @@
-import * as pdfjsLib from 'pdfjs-dist/build/pdf';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs';
+const { ipcRenderer } = require('electron');
+const { pathToFileURL } = require('node:url');
+const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+const workerPath = require.resolve('pdfjs-dist/legacy/build/pdf.worker.js');
+pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).toString();
 
 const state = {
   pdf: null,
@@ -236,10 +238,7 @@ const handleDrop = async (event) => {
 };
 
 const requestOpenPdf = async () => {
-  if (!window.api) {
-    return;
-  }
-  const result = await window.api.openPdf();
+  const result = await ipcRenderer.invoke('open-pdf-dialog');
   if (!result) return;
   await loadPdfData({
     data: result.data,
@@ -249,10 +248,10 @@ const requestOpenPdf = async () => {
 };
 
 const requestSavePdf = async () => {
-  if (!window.api || !state.pdfData) {
+  if (!state.pdfData) {
     return;
   }
-  await window.api.savePdf({
+  await ipcRenderer.invoke('save-pdf-dialog', {
     sourcePath: state.filePath,
     outline: state.outline
   });

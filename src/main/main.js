@@ -15,8 +15,8 @@ const createWindow = () => {
     minHeight: 600,
     title: 'PDF Outline Editor',
     webPreferences: {
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      contextIsolation: false,
+      nodeIntegration: true
     }
   });
 
