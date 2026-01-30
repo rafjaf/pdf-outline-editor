@@ -1,8 +1,12 @@
 const { ipcRenderer } = require('electron');
+const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
 
-const workerPath = require.resolve('pdfjs-dist/legacy/build/pdf.worker.js');
+const moduleSearchPaths = [process.cwd(), __dirname];
+const pdfPath = require.resolve('pdfjs-dist/legacy/build/pdf.js', { paths: moduleSearchPaths });
+const workerPath = require.resolve('pdfjs-dist/legacy/build/pdf.worker.js', { paths: moduleSearchPaths });
+const pdfjsLib = require(pdfPath);
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).toString();
 
 const state = {
