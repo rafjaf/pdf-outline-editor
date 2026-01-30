@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Outline Editor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="app-header">
+        <div class="app-title">PDF Outline Editor</div>
+        <div class="header-actions">
+          <button class="ghost" id="openPdf" title="Open PDF">
+            <span>📂</span>
+            <span>Open</span>
+          </button>
+          <button class="ghost" id="savePdf" title="Save PDF with outline">
+            <span>💾</span>
+            <span>Save</span>
+          </button>
+        </div>
+      </header>
+      <div class="content">
+        <aside class="outline-pane" id="outlinePane">
+          <div class="outline-toolbar">
+            <button class="icon" id="addTitle" title="Add title to current page">➕</button>
+            <button class="icon" id="addChild" title="Add nested title">↳</button>
+            <button class="icon" id="deleteTitle" title="Delete title">🗑️</button>
+            <button class="icon" id="indentTitle" title="Increase level">➡️</button>
+            <button class="icon" id="outdentTitle" title="Decrease level">⬅️</button>
+            <button class="icon" id="moveUp" title="Move up">⬆️</button>
+            <button class="icon" id="moveDown" title="Move down">⬇️</button>
+          </div>
+          <div class="outline-list" id="outlineList">
+            <div class="empty-state">
+              Open a PDF to start building an outline.
+            </div>
+          </div>
+        </aside>
+        <div class="divider" id="divider"></div>
+        <main class="viewer-pane">
+          <div class="viewer-toolbar">
+            <button class="icon" id="prevPage" title="Previous page">◀</button>
+            <div class="page-indicator">
+              Page <span id="currentPage">1</span> / <span id="totalPages">1</span>
+            </div>
+            <button class="icon" id="nextPage" title="Next page">▶</button>
+            <label class="ghost" title="Zoom">
+              🔍
+              <input id="zoomSlider" type="range" min="80" max="160" value="110" />
+            </label>
+          </div>
+          <div class="viewer" id="viewer"></div>
+          <div class="drop-zone" id="dropZone">
+            Drag a PDF here or click Open to begin.
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="context-menu" id="contextMenu">
+      <button data-action="add">Add title</button>
+      <button data-action="addChild">Add nested title</button>
+      <button data-action="delete">Delete</button>
+      <button data-action="indent">Increase level</button>
+      <button data-action="outdent">Decrease level</button>
+      <button data-action="moveUp">Move up</button>
+      <button data-action="moveDown">Move down</button>
+    </div>
+    <script type="module" src="renderer.js"></script>
+  </body>
+</html>

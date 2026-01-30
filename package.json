@@ -1,0 +1,20 @@
+{
+  "name": "pdf-toc-editor",
+  "version": "0.1.0",
+  "description": "Desktop app to edit PDF outlines",
+  "main": "src/main/main.js",
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/outline.test.js",
+    "download:fixture": "node scripts/download-fixture.js",
+    "lint": "node scripts/lint-config.js"
+  },
+  "dependencies": {
+    "electron": "^30.0.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.3.136"
+  }
+}
