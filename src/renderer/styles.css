@@ -221,6 +221,34 @@ body {
   margin-left: 4px;
 }
 
+.outline-item.drag-over-above::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  z-index: 10;
+}
+
+.outline-item.drag-over-below::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  z-index: 10;
+}
+
+.outline-item.dragging {
+  opacity: 0.5;
+}
+
 .outline-item:hover {
   background: #f8f9ff;
 }

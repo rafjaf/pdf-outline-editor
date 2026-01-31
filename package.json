@@ -22,6 +22,10 @@
     "directories": {
       "output": "dist"
     },
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/pdfjs-dist/**/*"
+    ],
     "files": [
       "src/**/*",
       "node_modules/**/*",
@@ -31,7 +35,6 @@
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "target": [
-        "dmg",
         "zip"
       ],
       "extendInfo": {

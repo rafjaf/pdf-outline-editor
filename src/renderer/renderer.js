@@ -1,26 +1,44 @@
 const { ipcRenderer } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const fs = require('fs');
 
 let pdfjsLib = null;
 let pdfjsReady = null;
+
+// Get the correct path to node_modules, handling both dev and production
+const getNodeModulesPath = () => {
+  // In production (asar), node_modules might be unpacked
+  const devPath = path.join(__dirname, '../../node_modules');
+  const prodPath = path.join(__dirname, '../../app.asar.unpacked/node_modules');
+  const asarPath = path.join(process.resourcesPath || '', 'app.asar.unpacked/node_modules');
+  
+  // Check which path exists
+  if (fs.existsSync(asarPath)) {
+    return asarPath;
+  }
+  if (fs.existsSync(prodPath)) {
+    return prodPath;
+  }
+  return devPath;
+};
 
 const ensurePdfJsLoaded = async () => {
   if (!pdfjsReady) {
     pdfjsReady = (async () => {
       try {
-        const pdfModuleUrl = pathToFileURL(
-          path.join(__dirname, '../../node_modules/pdfjs-dist/legacy/build/pdf.mjs')
-        ).toString();
-        console.log('[PDF.js] Loading from local module:', pdfModuleUrl);
+        const nodeModulesPath = getNodeModulesPath();
+        const pdfModulePath = path.join(nodeModulesPath, 'pdfjs-dist/legacy/build/pdf.mjs');
+        const pdfModuleUrl = pathToFileURL(pdfModulePath).toString();
+        console.log('[PDF.js] Loading from:', pdfModuleUrl);
         pdfjsLib = await import(pdfModuleUrl);
         pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(
-          path.join(__dirname, '../../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs')
+          path.join(nodeModulesPath, 'pdfjs-dist/legacy/build/pdf.worker.mjs')
         ).toString();
-        console.log('[PDF.js] Loaded successfully from local module');
+        console.log('[PDF.js] Loaded successfully');
         console.log('[PDF.js] Worker source:', pdfjsLib.GlobalWorkerOptions.workerSrc);
       } catch (error) {
-        console.error('[PDF.js] Failed to load from local module:', error);
+        console.error('[PDF.js] Failed to load:', error);
         throw error;
       }
     })();
@@ -346,6 +364,51 @@ const refreshOutline = () => {
     row.addEventListener('dragstart', (event) => {
       event.dataTransfer.effectAllowed = 'move';
       event.dataTransfer.setData('text/plain', index.toString());
+      row.classList.add('dragging');
+    });
+
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      // Clean up all drag indicators
+      document.querySelectorAll('.drag-over-above, .drag-over-below').forEach(el => {
+        el.classList.remove('drag-over-above', 'drag-over-below');
+      });
+    });
+
+    row.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      
+      // Don't show indicator on the item being dragged
+      if (row.classList.contains('dragging')) return;
+      
+      // Remove other indicators
+      document.querySelectorAll('.drag-over-above, .drag-over-below').forEach(el => {
+        if (el !== row) {
+          el.classList.remove('drag-over-above', 'drag-over-below');
+        }
+      });
+      
+      // Determine if we're in the top or bottom half
+      const rect = row.getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+      
+      if (event.clientY < midpoint) {
+        row.classList.add('drag-over-above');
+        row.classList.remove('drag-over-below');
+      } else {
+        row.classList.add('drag-over-below');
+        row.classList.remove('drag-over-above');
+      }
+    });
+
+    row.addEventListener('dragleave', (event) => {
+      // Only remove if we're actually leaving the element
+      const rect = row.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || 
+          event.clientY < rect.top || event.clientY > rect.bottom) {
+        row.classList.remove('drag-over-above', 'drag-over-below');
+      }
     });
   });
 
@@ -788,11 +851,25 @@ elements.outlineList.addEventListener('dragover', (event) => {
   event.preventDefault();
 });
 
+elements.outlineList.addEventListener('dragleave', (event) => {
+  // Clean up indicators when leaving the outline list entirely
+  if (!elements.outlineList.contains(event.relatedTarget)) {
+    document.querySelectorAll('.drag-over-above, .drag-over-below').forEach(el => {
+      el.classList.remove('drag-over-above', 'drag-over-below');
+    });
+  }
+});
+
 elements.outlineList.addEventListener('drop', (event) => {
   event.preventDefault();
+  
+  // Clean up drag indicators
+  document.querySelectorAll('.drag-over-above, .drag-over-below').forEach(el => {
+    el.classList.remove('drag-over-above', 'drag-over-below');
+  });
+  
   const target = event.target.closest('.outline-item');
   if (!target) return;
-  const targetIndex = Number(target.dataset.index);
   
   // Get all selected items in order
   const selectedItems = getSelectedItems();
@@ -801,6 +878,10 @@ elements.outlineList.addEventListener('drop', (event) => {
   // Check if target is one of the selected items
   const targetId = target.dataset.id;
   if (state.selectedIds.has(targetId)) return;
+  
+  // Determine if dropping above or below based on mouse position
+  const rect = target.getBoundingClientRect();
+  const dropBelow = event.clientY > rect.top + rect.height / 2;
   
   saveHistory(selectedItems.length > 1 ? 'Move titles by drag' : 'Move title by drag');
   
@@ -814,9 +895,14 @@ elements.outlineList.addEventListener('drop', (event) => {
     removedItems.unshift(state.outline.splice(idx, 1)[0]);
   }
   
-  // Find new target index (it may have shifted)
+  // Find new target index (it may have shifted after removals)
   let newTargetIndex = state.outline.findIndex(o => o.id === targetId);
   if (newTargetIndex < 0) newTargetIndex = state.outline.length;
+  
+  // If dropping below, insert after the target
+  if (dropBelow) {
+    newTargetIndex++;
+  }
   
   // Insert all items at target position
   state.outline.splice(newTargetIndex, 0, ...removedItems);
