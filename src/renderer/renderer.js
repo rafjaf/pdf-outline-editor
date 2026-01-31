@@ -351,6 +351,54 @@ const refreshOutline = () => {
 
   // Append all at once for better performance
   elements.outlineList.appendChild(fragment);
+  
+  // Update button states based on selection
+  updateButtonStates();
+};
+
+// Update toolbar buttons and context menu based on selection
+const updateButtonStates = () => {
+  const single = hasSingleSelection();
+  const any = hasSelection();
+  
+  // Buttons that require single selection
+  const singleOnlyButtons = ['renameTitle', 'setPage', 'moveUp', 'moveDown'];
+  singleOnlyButtons.forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.disabled = !single;
+    }
+  });
+  
+  // Buttons that require any selection
+  const anySelectionButtons = ['deleteTitle', 'indentTitle', 'outdentTitle'];
+  anySelectionButtons.forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.disabled = !any;
+    }
+  });
+  
+  // Update context menu items
+  const contextActions = {
+    rename: single,
+    setPage: single,
+    moveUp: single,
+    moveDown: single,
+    delete: any,
+    indent: any,
+    outdent: any,
+    add: true,
+    addChild: true
+  };
+  
+  Object.entries(contextActions).forEach(([action, enabled]) => {
+    const menuItem = elements.contextMenu.querySelector(`[data-action="${action}"]`);
+    if (menuItem) {
+      menuItem.disabled = !enabled;
+      menuItem.classList.toggle('disabled', !enabled);
+    }
+  });
 };
 
 const shouldHideItem = (item, index) => {
@@ -434,8 +482,29 @@ const adjustLevel = (delta) => {
   
   saveHistory(delta > 0 ? 'Indent titles' : 'Outdent titles');
   for (const item of items) {
-    item.level = Math.max(0, item.level + delta);
+    const idx = state.outline.findIndex(o => o.id === item.id);
+    let newLevel = Math.max(0, item.level + delta);
+    
+    // Ensure logical hierarchy: can't exceed previous item's level + 1
+    if (idx > 0) {
+      const prevItem = state.outline[idx - 1];
+      newLevel = Math.min(newLevel, prevItem.level + 1);
+    } else {
+      // First item must be level 0
+      newLevel = Math.min(newLevel, 0);
+    }
+    
+    item.level = newLevel;
   }
+  
+  // After adjusting, fix any children that now violate hierarchy
+  for (let i = 1; i < state.outline.length; i++) {
+    const prevLevel = state.outline[i - 1].level;
+    if (state.outline[i].level > prevLevel + 1) {
+      state.outline[i].level = prevLevel + 1;
+    }
+  }
+  
   refreshOutline();
 };
 
@@ -721,14 +790,36 @@ elements.outlineList.addEventListener('dragover', (event) => {
 
 elements.outlineList.addEventListener('drop', (event) => {
   event.preventDefault();
-  const sourceIndex = Number(event.dataTransfer.getData('text/plain'));
   const target = event.target.closest('.outline-item');
   if (!target) return;
   const targetIndex = Number(target.dataset.index);
-  if (sourceIndex === targetIndex) return;
-  saveHistory('Move title by drag');
-  const [removed] = state.outline.splice(sourceIndex, 1);
-  state.outline.splice(targetIndex, 0, removed);
+  
+  // Get all selected items in order
+  const selectedItems = getSelectedItems();
+  if (selectedItems.length === 0) return;
+  
+  // Check if target is one of the selected items
+  const targetId = target.dataset.id;
+  if (state.selectedIds.has(targetId)) return;
+  
+  saveHistory(selectedItems.length > 1 ? 'Move titles by drag' : 'Move title by drag');
+  
+  // Remove all selected items from their current positions (from end to start)
+  const selectedIndices = selectedItems
+    .map(item => state.outline.findIndex(o => o.id === item.id))
+    .sort((a, b) => b - a);
+  
+  const removedItems = [];
+  for (const idx of selectedIndices) {
+    removedItems.unshift(state.outline.splice(idx, 1)[0]);
+  }
+  
+  // Find new target index (it may have shifted)
+  let newTargetIndex = state.outline.findIndex(o => o.id === targetId);
+  if (newTargetIndex < 0) newTargetIndex = state.outline.length;
+  
+  // Insert all items at target position
+  state.outline.splice(newTargetIndex, 0, ...removedItems);
   refreshOutline();
 });
 
@@ -748,7 +839,16 @@ elements.viewer.addEventListener('drop', handleDrop);
 document.addEventListener('click', () => closeContextMenu());
 
 elements.contextMenu.addEventListener('click', (event) => {
-  const action = event.target.dataset.action;
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  
+  // Don't execute if disabled
+  if (button.disabled || button.classList.contains('disabled')) {
+    event.stopPropagation();
+    return;
+  }
+  
+  const action = button.dataset.action;
   if (action && outlineActions[action]) {
     outlineActions[action]();
   }
@@ -793,11 +893,12 @@ document.getElementById('pageModal').addEventListener('click', (event) => {
 });
 
 // Keyboard navigation helper
-const navigateSelection = (delta) => {
+const navigateSelection = (delta, extendSelection = false) => {
   if (state.outline.length === 0) return;
   
-  const firstId = getFirstSelectedId();
-  const currentIndex = firstId ? state.outline.findIndex(i => i.id === firstId) : -1;
+  // Use lastSelectedId for extending selection, otherwise use first selected
+  const anchorId = state.lastSelectedId || getFirstSelectedId();
+  const currentIndex = anchorId ? state.outline.findIndex(i => i.id === anchorId) : -1;
   let newIndex;
   
   if (currentIndex < 0) {
@@ -813,12 +914,29 @@ const navigateSelection = (delta) => {
   }
   
   if (newIndex >= 0 && newIndex < state.outline.length) {
-    state.selectedIds.clear();
-    state.selectedIds.add(state.outline[newIndex].id);
+    if (extendSelection) {
+      // Extend selection to include this item
+      state.selectedIds.add(state.outline[newIndex].id);
+    } else {
+      state.selectedIds.clear();
+      state.selectedIds.add(state.outline[newIndex].id);
+    }
     state.lastSelectedId = state.outline[newIndex].id;
     refreshOutline();
     scrollToPage(state.outline[newIndex].pageIndex + 1);
   }
+};
+
+// Find parent of an item
+const findParentIndex = (itemIndex) => {
+  if (itemIndex <= 0) return -1;
+  const item = state.outline[itemIndex];
+  for (let i = itemIndex - 1; i >= 0; i--) {
+    if (state.outline[i].level < item.level) {
+      return i;
+    }
+  }
+  return -1;
 };
 
 // Global keyboard shortcuts
@@ -828,16 +946,17 @@ document.addEventListener('keydown', (event) => {
   if (tagName === 'input' || tagName === 'textarea') return;
   
   const isMeta = event.metaKey || event.ctrlKey;
+  const isShift = event.shiftKey;
   
   // File operations
-  if (isMeta && event.key === 'o') {
+  if (isMeta && event.key.toLowerCase() === 'o') {
     event.preventDefault();
     requestOpenPdf();
     return;
   }
-  if (isMeta && event.key === 's') {
+  if (isMeta && event.key.toLowerCase() === 's') {
     event.preventDefault();
-    if (event.shiftKey) {
+    if (isShift) {
       requestSavePdfAs();
     } else {
       requestSavePdf();
@@ -846,25 +965,25 @@ document.addEventListener('keydown', (event) => {
   }
   
   // Undo/Redo
-  if (isMeta && event.key === 'z') {
+  if (isMeta && event.key.toLowerCase() === 'z') {
     event.preventDefault();
-    if (event.shiftKey) {
+    if (isShift) {
       redo();
     } else {
       undo();
     }
     return;
   }
-  if (isMeta && event.key === 'y') {
+  if (isMeta && event.key.toLowerCase() === 'y') {
     event.preventDefault();
     redo();
     return;
   }
   
-  // Add title
-  if (isMeta && event.key === 't') {
+  // Add title - check for T key explicitly with both cases
+  if (isMeta && (event.key === 't' || event.key === 'T')) {
     event.preventDefault();
-    if (event.shiftKey) {
+    if (isShift) {
       outlineActions.addChild();
     } else {
       outlineActions.add();
@@ -878,7 +997,7 @@ document.addEventListener('keydown', (event) => {
     if (isMeta) {
       outlineActions.moveUp();
     } else {
-      navigateSelection(-1);
+      navigateSelection(-1, isShift);
     }
     return;
   }
@@ -887,7 +1006,7 @@ document.addEventListener('keydown', (event) => {
     if (isMeta) {
       outlineActions.moveDown();
     } else {
-      navigateSelection(1);
+      navigateSelection(1, isShift);
     }
     return;
   }
@@ -896,15 +1015,26 @@ document.addEventListener('keydown', (event) => {
     if (isMeta) {
       outlineActions.outdent();
     } else if (hasSingleSelection()) {
-      // Collapse current item or go to parent
       const firstId = getFirstSelectedId();
-      const item = state.outline.find(i => i.id === firstId);
       const idx = state.outline.findIndex(i => i.id === firstId);
+      const item = state.outline[idx];
       const hasChildren = idx < state.outline.length - 1 && state.outline[idx + 1].level > item.level;
       
       if (hasChildren && !state.collapsedNodes.has(firstId)) {
+        // Collapse this item
         state.collapsedNodes.add(firstId);
         refreshOutline();
+      } else {
+        // No children or already collapsed: select and collapse parent
+        const parentIdx = findParentIndex(idx);
+        if (parentIdx >= 0) {
+          const parentId = state.outline[parentIdx].id;
+          state.collapsedNodes.add(parentId);
+          state.selectedIds.clear();
+          state.selectedIds.add(parentId);
+          state.lastSelectedId = parentId;
+          refreshOutline();
+        }
       }
     }
     return;
@@ -914,7 +1044,6 @@ document.addEventListener('keydown', (event) => {
     if (isMeta) {
       outlineActions.indent();
     } else if (hasSingleSelection()) {
-      // Expand current item
       const firstId = getFirstSelectedId();
       if (state.collapsedNodes.has(firstId)) {
         state.collapsedNodes.delete(firstId);
@@ -935,7 +1064,7 @@ document.addEventListener('keydown', (event) => {
   
   // Delete
   if (event.key === 'Delete' || event.key === 'Backspace') {
-    if (hasSelection() && !event.metaKey) {
+    if (hasSelection() && !isMeta) {
       event.preventDefault();
       outlineActions.delete();
     }
@@ -943,7 +1072,7 @@ document.addEventListener('keydown', (event) => {
   }
   
   // Select all
-  if (isMeta && event.key === 'a') {
+  if (isMeta && event.key.toLowerCase() === 'a') {
     event.preventDefault();
     state.outline.forEach(item => state.selectedIds.add(item.id));
     refreshOutline();

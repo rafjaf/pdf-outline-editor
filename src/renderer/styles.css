@@ -381,8 +381,15 @@ body {
   transition: background 0.15s ease;
 }
 
-.context-menu button:hover {
+.context-menu button:hover:not(:disabled) {
   background: #f3f4ff;
+}
+
+.context-menu button:disabled,
+.context-menu button.disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .context-menu hr {

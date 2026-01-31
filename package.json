@@ -66,12 +66,12 @@
     ]
   },
   "dependencies": {
-    "electron": "^30.0.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.3.136"
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
+    "electron": "^30.0.0",
     "electron-builder": "^26.4.0"
   }
 }
