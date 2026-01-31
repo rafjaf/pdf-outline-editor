@@ -33,14 +33,17 @@ const state = {
   pdf: null,
   pdfData: null,
   outline: [],
-  selectedId: null,
+  selectedIds: new Set(),  // Multi-select support
+  lastSelectedId: null,  // For SHIFT+click range selection
   currentPage: 1,
   zoom: 1.1,
   filePath: null,
   history: [],
   historyIndex: -1,
   collapsedNodes: new Set(),
-  lastActionName: null
+  lastActionName: null,
+  dirty: false,  // Track if document is modified
+  savedHistoryIndex: 0  // Track the history index when last saved
 };
 
 const elements = {
@@ -51,7 +54,37 @@ const elements = {
   currentPage: document.getElementById('currentPage'),
   totalPages: document.getElementById('totalPages'),
   undoBtn: document.getElementById('undo'),
-  redoBtn: document.getElementById('redo')
+  redoBtn: document.getElementById('redo'),
+  fileName: document.getElementById('fileName')
+};
+
+// Check if single selection (for actions that require it)
+const hasSingleSelection = () => state.selectedIds.size === 1;
+const hasSelection = () => state.selectedIds.size > 0;
+const getFirstSelectedId = () => state.selectedIds.values().next().value;
+const getSelectedItems = () => state.outline.filter(item => state.selectedIds.has(item.id));
+
+// Update dirty state
+const updateDirtyState = () => {
+  state.dirty = state.historyIndex !== state.savedHistoryIndex;
+  if (elements.fileName) {
+    if (state.dirty) {
+      elements.fileName.classList.add('dirty');
+    } else {
+      elements.fileName.classList.remove('dirty');
+    }
+  }
+};
+
+// Update filename display
+const updateFileName = () => {
+  if (elements.fileName && state.filePath) {
+    const path = require('path');
+    elements.fileName.textContent = path.basename(state.filePath);
+  } else if (elements.fileName) {
+    elements.fileName.textContent = '';
+  }
+  updateDirtyState();
 };
 
 const MAX_HISTORY = 10;
@@ -65,8 +98,11 @@ const saveHistory = (actionName = 'change') => {
   while (state.history.length > MAX_HISTORY + 1) {
     state.history.shift();
     state.historyIndex--;
+    // Adjust saved index too
+    if (state.savedHistoryIndex > 0) state.savedHistoryIndex--;
   }
   updateUndoRedoButtons();
+  updateDirtyState();
 };
 
 const updateUndoRedoButtons = () => {
@@ -77,9 +113,9 @@ const updateUndoRedoButtons = () => {
     elements.undoBtn.disabled = !canUndo;
     if (canUndo) {
       const actionName = state.history[state.historyIndex].actionName;
-      elements.undoBtn.title = `Undo: ${actionName}`;
+      elements.undoBtn.title = `Undo: ${actionName} (⌘Z)`;
     } else {
-      elements.undoBtn.title = 'Nothing to undo';
+      elements.undoBtn.title = 'Nothing to undo (⌘Z)';
     }
   }
   
@@ -87,9 +123,9 @@ const updateUndoRedoButtons = () => {
     elements.redoBtn.disabled = !canRedo;
     if (canRedo) {
       const actionName = state.history[state.historyIndex + 1].actionName;
-      elements.redoBtn.title = `Redo: ${actionName}`;
+      elements.redoBtn.title = `Redo: ${actionName} (⌘Y)`;
     } else {
-      elements.redoBtn.title = 'Nothing to redo';
+      elements.redoBtn.title = 'Nothing to redo (⌘Y)';
     }
   }
 };
@@ -100,6 +136,7 @@ const undo = () => {
     state.outline = JSON.parse(JSON.stringify(state.history[state.historyIndex].snapshot));
     refreshOutline();
     updateUndoRedoButtons();
+    updateDirtyState();
   }
 };
 
@@ -109,15 +146,17 @@ const redo = () => {
     state.outline = JSON.parse(JSON.stringify(state.history[state.historyIndex].snapshot));
     refreshOutline();
     updateUndoRedoButtons();
+    updateDirtyState();
   }
 };
 
 const startRename = () => {
-  if (!state.selectedId) return;
-  const item = state.outline.find(entry => entry.id === state.selectedId);
+  if (!hasSingleSelection()) return;
+  const selectedId = getFirstSelectedId();
+  const item = state.outline.find(entry => entry.id === selectedId);
   if (!item) return;
   
-  const row = elements.outlineList.querySelector(`[data-id="${state.selectedId}"]`);
+  const row = elements.outlineList.querySelector(`[data-id="${selectedId}"]`);
   if (!row) return;
   
   const title = row.querySelector('.outline-title');
@@ -204,7 +243,7 @@ const refreshOutline = () => {
     }
 
     const row = document.createElement('div');
-    row.className = `outline-item ${item.id === state.selectedId ? 'active' : ''}`;
+    row.className = `outline-item ${state.selectedIds.has(item.id) ? 'active' : ''}`;
     row.draggable = true;
     row.dataset.id = item.id;
     row.dataset.index = index;
@@ -261,8 +300,29 @@ const refreshOutline = () => {
     row.append(toggle, title);
     fragment.append(row);
 
-    row.addEventListener('click', () => {
-      state.selectedId = item.id;
+    row.addEventListener('click', (e) => {
+      if (e.metaKey || e.ctrlKey) {
+        // CMD/CTRL+click: toggle individual selection
+        if (state.selectedIds.has(item.id)) {
+          state.selectedIds.delete(item.id);
+        } else {
+          state.selectedIds.add(item.id);
+        }
+        state.lastSelectedId = item.id;
+      } else if (e.shiftKey && state.lastSelectedId) {
+        // SHIFT+click: range selection
+        const lastIndex = state.outline.findIndex(i => i.id === state.lastSelectedId);
+        const currentIndex = index;
+        const [start, end] = lastIndex < currentIndex ? [lastIndex, currentIndex] : [currentIndex, lastIndex];
+        for (let i = start; i <= end; i++) {
+          state.selectedIds.add(state.outline[i].id);
+        }
+      } else {
+        // Regular click: single selection
+        state.selectedIds.clear();
+        state.selectedIds.add(item.id);
+        state.lastSelectedId = item.id;
+      }
       refreshOutline();
       scrollToPage(item.pageIndex + 1);
     });
@@ -274,7 +334,11 @@ const refreshOutline = () => {
 
     row.addEventListener('contextmenu', (event) => {
       event.preventDefault();
-      state.selectedId = item.id;
+      if (!state.selectedIds.has(item.id)) {
+        state.selectedIds.clear();
+        state.selectedIds.add(item.id);
+        state.lastSelectedId = item.id;
+      }
       refreshOutline();
       openContextMenu(event.clientX, event.clientY);
     });
@@ -313,7 +377,8 @@ const addOutlineItem = ({ asChild }) => {
   if (!state.pdf) return;
 
   saveHistory(asChild ? 'Add nested title' : 'Add title');
-  const baseIndex = state.outline.findIndex((item) => item.id === state.selectedId);
+  const firstId = getFirstSelectedId();
+  const baseIndex = firstId ? state.outline.findIndex((item) => item.id === firstId) : -1;
   const insertIndex = baseIndex >= 0 ? baseIndex + 1 : state.outline.length;
   const baseLevel = baseIndex >= 0 ? state.outline[baseIndex].level : 0;
   const level = asChild ? Math.min(baseLevel + 1, 6) : baseLevel;
@@ -326,31 +391,59 @@ const addOutlineItem = ({ asChild }) => {
   };
 
   state.outline.splice(insertIndex, 0, item);
-  state.selectedId = item.id;
+  state.selectedIds.clear();
+  state.selectedIds.add(item.id);
+  state.lastSelectedId = item.id;
   refreshOutline();
 };
 
 const deleteOutlineItem = () => {
-  if (!state.selectedId) return;
-  const index = state.outline.findIndex((item) => item.id === state.selectedId);
-  if (index >= 0) {
-    saveHistory('Delete title');
+  if (!hasSelection()) return;
+  
+  // Get indices of selected items (sorted in reverse order for safe deletion)
+  const indices = getSelectedItems()
+    .map(item => state.outline.findIndex(o => o.id === item.id))
+    .filter(idx => idx >= 0)
+    .sort((a, b) => b - a);
+  
+  if (indices.length === 0) return;
+  
+  saveHistory(indices.length > 1 ? 'Delete titles' : 'Delete title');
+  
+  // Delete from highest index first to maintain correct indices
+  for (const index of indices) {
     state.outline.splice(index, 1);
-    state.selectedId = state.outline[index]?.id ?? state.outline[index - 1]?.id ?? null;
-    refreshOutline();
   }
+  
+  // Select next available item
+  const lowestDeletedIndex = Math.min(...indices);
+  const newSelectedId = state.outline[lowestDeletedIndex]?.id ?? 
+                        state.outline[lowestDeletedIndex - 1]?.id ?? null;
+  state.selectedIds.clear();
+  if (newSelectedId) {
+    state.selectedIds.add(newSelectedId);
+    state.lastSelectedId = newSelectedId;
+  }
+  refreshOutline();
 };
 
 const adjustLevel = (delta) => {
-  const item = state.outline.find((entry) => entry.id === state.selectedId);
-  if (!item) return;
-  saveHistory(delta > 0 ? 'Indent title' : 'Outdent title');
-  item.level = Math.max(0, item.level + delta);
+  if (!hasSelection()) return;
+  const items = getSelectedItems();
+  if (items.length === 0) return;
+  
+  saveHistory(delta > 0 ? 'Indent titles' : 'Outdent titles');
+  for (const item of items) {
+    item.level = Math.max(0, item.level + delta);
+  }
   refreshOutline();
 };
 
 const moveItem = (delta) => {
-  const index = state.outline.findIndex((item) => item.id === state.selectedId);
+  // Move only works with single selection
+  if (!hasSingleSelection()) return;
+  const firstId = getFirstSelectedId();
+  const index = state.outline.findIndex((item) => item.id === firstId);
   if (index < 0) return;
   const nextIndex = index + delta;
   if (nextIndex < 0 || nextIndex >= state.outline.length) return;
@@ -464,6 +557,23 @@ const expandAll = () => {
   refreshOutline();
 };
 
+const fitToWidth = async () => {
+  if (!state.pdf) return;
+  
+  // Get the first page to calculate optimal zoom
+  const page = await state.pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const viewerWidth = elements.viewer.clientWidth - 40; // Account for padding
+  const optimalZoom = viewerWidth / viewport.width;
+  
+  // Update zoom slider and state
+  state.zoom = optimalZoom;
+  const zoomSlider = document.getElementById('zoomSlider');
+  zoomSlider.value = Math.round(optimalZoom * 100);
+  
+  await renderPdf();
+};
+
 const loadPdfData = async ({ data, filePath, outline = [] }) => {
   await ensurePdfJsLoaded();
   state.filePath = filePath;
@@ -478,9 +588,13 @@ const loadPdfData = async ({ data, filePath, outline = [] }) => {
   state.currentPage = 1;
   state.history = [{ snapshot: JSON.parse(JSON.stringify(state.outline)), actionName: 'Open file' }];
   state.historyIndex = 0;
+  state.savedHistoryIndex = 0;
+  state.selectedIds.clear();
+  state.lastSelectedId = null;
   state.collapsedNodes.clear();
   setPageIndicators();
   updateUndoRedoButtons();
+  updateFileName();
   elements.dropZone.style.display = 'none';
   
   // Refresh outline BEFORE rendering PDF pages so it shows immediately
@@ -518,6 +632,9 @@ const requestSavePdf = async () => {
     sourcePath: state.filePath,
     outline: state.outline
   });
+  state.savedHistoryIndex = state.historyIndex;
+  updateDirtyState();
+  updateFileName();
 };
 
 const requestSavePdfAs = async () => {
@@ -530,12 +647,16 @@ const requestSavePdfAs = async () => {
   });
   if (result && result.filePath) {
     state.filePath = result.filePath;
+    state.savedHistoryIndex = state.historyIndex;
+    updateDirtyState();
+    updateFileName();
   }
 };
 
 const openPageModal = () => {
-  if (!state.selectedId) return;
-  const item = state.outline.find(entry => entry.id === state.selectedId);
+  if (!hasSingleSelection()) return;
+  const firstId = getFirstSelectedId();
+  const item = state.outline.find(entry => entry.id === firstId);
   if (!item) return;
   
   const modal = document.getElementById('pageModal');
@@ -552,8 +673,9 @@ const closePageModal = () => {
 };
 
 const confirmPageModal = () => {
-  if (!state.selectedId) return;
-  const item = state.outline.find(entry => entry.id === state.selectedId);
+  if (!hasSingleSelection()) return;
+  const firstId = getFirstSelectedId();
+  const item = state.outline.find(entry => entry.id === firstId);
   if (!item) return;
   
   const input = document.getElementById('pageInput');
@@ -586,6 +708,7 @@ document.getElementById('redo').addEventListener('click', () => redo());
 
 document.getElementById('prevPage').addEventListener('click', () => scrollToPage(Math.max(1, state.currentPage - 1)));
 document.getElementById('nextPage').addEventListener('click', () => scrollToPage(Math.min(state.pdf?.numPages ?? 1, state.currentPage + 1)));
+document.getElementById('fitWidth').addEventListener('click', fitToWidth);
 
 document.getElementById('zoomSlider').addEventListener('input', async (event) => {
   state.zoom = Number(event.target.value) / 100;
@@ -602,6 +725,8 @@ elements.outlineList.addEventListener('drop', (event) => {
   const target = event.target.closest('.outline-item');
   if (!target) return;
   const targetIndex = Number(target.dataset.index);
+  if (sourceIndex === targetIndex) return;
+  saveHistory('Move title by drag');
   const [removed] = state.outline.splice(sourceIndex, 1);
   state.outline.splice(targetIndex, 0, removed);
   refreshOutline();
@@ -665,6 +790,170 @@ document.getElementById('pageModal').addEventListener('click', (event) => {
   if (event.target === event.currentTarget) {
     closePageModal();
   }
+});
+
+// Keyboard navigation helper
+const navigateSelection = (delta) => {
+  if (state.outline.length === 0) return;
+  
+  const firstId = getFirstSelectedId();
+  const currentIndex = firstId ? state.outline.findIndex(i => i.id === firstId) : -1;
+  let newIndex;
+  
+  if (currentIndex < 0) {
+    newIndex = delta > 0 ? 0 : state.outline.length - 1;
+  } else {
+    newIndex = Math.max(0, Math.min(state.outline.length - 1, currentIndex + delta));
+  }
+  
+  // Skip collapsed items
+  const isVisible = (idx) => !shouldHideItem(state.outline[idx], idx);
+  while (newIndex >= 0 && newIndex < state.outline.length && !isVisible(newIndex)) {
+    newIndex += delta;
+  }
+  
+  if (newIndex >= 0 && newIndex < state.outline.length) {
+    state.selectedIds.clear();
+    state.selectedIds.add(state.outline[newIndex].id);
+    state.lastSelectedId = state.outline[newIndex].id;
+    refreshOutline();
+    scrollToPage(state.outline[newIndex].pageIndex + 1);
+  }
+};
+
+// Global keyboard shortcuts
+document.addEventListener('keydown', (event) => {
+  // Don't handle shortcuts when in input elements
+  const tagName = event.target.tagName.toLowerCase();
+  if (tagName === 'input' || tagName === 'textarea') return;
+  
+  const isMeta = event.metaKey || event.ctrlKey;
+  
+  // File operations
+  if (isMeta && event.key === 'o') {
+    event.preventDefault();
+    requestOpenPdf();
+    return;
+  }
+  if (isMeta && event.key === 's') {
+    event.preventDefault();
+    if (event.shiftKey) {
+      requestSavePdfAs();
+    } else {
+      requestSavePdf();
+    }
+    return;
+  }
+  
+  // Undo/Redo
+  if (isMeta && event.key === 'z') {
+    event.preventDefault();
+    if (event.shiftKey) {
+      redo();
+    } else {
+      undo();
+    }
+    return;
+  }
+  if (isMeta && event.key === 'y') {
+    event.preventDefault();
+    redo();
+    return;
+  }
+  
+  // Add title
+  if (isMeta && event.key === 't') {
+    event.preventDefault();
+    if (event.shiftKey) {
+      outlineActions.addChild();
+    } else {
+      outlineActions.add();
+    }
+    return;
+  }
+  
+  // Arrow key navigation
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (isMeta) {
+      outlineActions.moveUp();
+    } else {
+      navigateSelection(-1);
+    }
+    return;
+  }
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    if (isMeta) {
+      outlineActions.moveDown();
+    } else {
+      navigateSelection(1);
+    }
+    return;
+  }
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    if (isMeta) {
+      outlineActions.outdent();
+    } else if (hasSingleSelection()) {
+      // Collapse current item or go to parent
+      const firstId = getFirstSelectedId();
+      const item = state.outline.find(i => i.id === firstId);
+      const idx = state.outline.findIndex(i => i.id === firstId);
+      const hasChildren = idx < state.outline.length - 1 && state.outline[idx + 1].level > item.level;
+      
+      if (hasChildren && !state.collapsedNodes.has(firstId)) {
+        state.collapsedNodes.add(firstId);
+        refreshOutline();
+      }
+    }
+    return;
+  }
+  if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    if (isMeta) {
+      outlineActions.indent();
+    } else if (hasSingleSelection()) {
+      // Expand current item
+      const firstId = getFirstSelectedId();
+      if (state.collapsedNodes.has(firstId)) {
+        state.collapsedNodes.delete(firstId);
+        refreshOutline();
+      }
+    }
+    return;
+  }
+  
+  // Rename
+  if (event.key === 'F2' || event.key === 'Enter') {
+    if (hasSingleSelection()) {
+      event.preventDefault();
+      startRename();
+    }
+    return;
+  }
+  
+  // Delete
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    if (hasSelection() && !event.metaKey) {
+      event.preventDefault();
+      outlineActions.delete();
+    }
+    return;
+  }
+  
+  // Select all
+  if (isMeta && event.key === 'a') {
+    event.preventDefault();
+    state.outline.forEach(item => state.selectedIds.add(item.id));
+    refreshOutline();
+    return;
+  }
+});
+
+// Handle file opened from main process (CLI or drag on app icon)
+ipcRenderer.on('open-file', async (event, { data, filePath, outline }) => {
+  await loadPdfData({ data, filePath, outline });
 });
 
 // Initialize version display

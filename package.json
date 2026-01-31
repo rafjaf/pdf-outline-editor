@@ -1,20 +1,77 @@
 {
   "name": "pdf-toc-editor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop app to edit PDF outlines",
   "main": "src/main/main.js",
-  "author": "",
+  "author": "PDF TOC Editor Team",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "start": "electron .",
     "test": "node tests/outline.test.js",
     "download:fixture": "node scripts/download-fixture.js",
-    "lint": "node scripts/lint-config.js"
+    "lint": "node scripts/lint-config.js",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.pdftoceditor.app",
+    "productName": "PDF TOC Editor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "PDF Document",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": ["com.adobe.pdf"],
+            "CFBundleTypeExtensions": ["pdf"]
+          }
+        ]
+      }
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": ["nsis", "portable"]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": ["AppImage", "deb"],
+      "category": "Office"
+    },
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "description": "Portable Document Format",
+        "role": "Editor",
+        "mimeType": "application/pdf"
+      }
+    ]
   },
   "dependencies": {
     "electron": "^30.0.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.3.136"
+  },
+  "devDependencies": {
+    "@electron/notarize": "^3.1.1",
+    "electron-builder": "^26.4.0"
   }
 }

@@ -9,17 +9,20 @@
   <body>
     <div class="app">
       <header class="app-header">
-        <div class="app-title">PDF Outline Editor <span class="version" id="appVersion"></span></div>
+        <div class="app-title">
+          PDF Outline Editor <span class="version" id="appVersion"></span>
+          <span class="file-name" id="fileName"></span>
+        </div>
         <div class="header-actions">
-          <button class="ghost" id="openPdf" title="Open PDF">
+          <button class="ghost" id="openPdf" title="Open PDF (⌘O)">
             <span>📂</span>
             <span>Open</span>
           </button>
-          <button class="ghost" id="savePdf" title="Save PDF (overwrites original, creates backup)">
+          <button class="ghost" id="savePdf" title="Save PDF (⌘S)">
             <span>💾</span>
             <span>Save</span>
           </button>
-          <button class="ghost" id="savePdfAs" title="Save PDF to new file">
+          <button class="ghost" id="savePdfAs" title="Save PDF As (⌘⇧S)">
             <span>📄</span>
             <span>Save As</span>
           </button>
@@ -27,28 +30,28 @@
       </header>
       <div class="unified-toolbar">
         <div class="toolbar-group">
-          <button class="icon" id="addTitle" title="Add title to current page">➕</button>
-          <button class="icon" id="addChild" title="Add nested title">↳</button>
+          <button class="icon" id="addTitle" title="Add title (⌘T)">➕</button>
+          <button class="icon" id="addChild" title="Add nested title (⌘⇧T)">↳</button>
         </div>
         <div class="toolbar-separator"></div>
         <div class="toolbar-group">
-          <button class="icon" id="renameTitle" title="Rename title">✏️</button>
+          <button class="icon" id="renameTitle" title="Rename (F2 or Enter)">✏️</button>
           <button class="icon" id="setPage" title="Set target page">📍</button>
-          <button class="icon" id="deleteTitle" title="Delete title">🗑️</button>
+          <button class="icon" id="deleteTitle" title="Delete (Del)">🗑️</button>
         </div>
         <div class="toolbar-separator"></div>
         <div class="toolbar-group">
-          <button class="icon" id="outdentTitle" title="Decrease level">⬅️</button>
-          <button class="icon" id="indentTitle" title="Increase level">➡️</button>
-          <button class="icon" id="moveUp" title="Move up">⬆️</button>
-          <button class="icon" id="moveDown" title="Move down">⬇️</button>
+          <button class="icon" id="outdentTitle" title="Decrease level (⌘←)">⬅️</button>
+          <button class="icon" id="indentTitle" title="Increase level (⌘→)">➡️</button>
+          <button class="icon" id="moveUp" title="Move up (⌘↑)">⬆️</button>
+          <button class="icon" id="moveDown" title="Move down (⌘↓)">⬇️</button>
         </div>
         <div class="toolbar-separator"></div>
         <div class="toolbar-group">
           <button class="icon" id="expandAll" title="Expand all">⊞</button>
           <button class="icon" id="collapseAll" title="Collapse all">⊟</button>
-          <button class="icon" id="undo" title="Nothing to undo" disabled>↶</button>
-          <button class="icon" id="redo" title="Nothing to redo" disabled>↷</button>
+          <button class="icon" id="undo" title="Nothing to undo (⌘Z)" disabled>↶</button>
+          <button class="icon" id="redo" title="Nothing to redo (⌘Y)" disabled>↷</button>
         </div>
         <div class="toolbar-spacer"></div>
         <div class="toolbar-group">
@@ -60,6 +63,7 @@
         </div>
         <div class="toolbar-separator"></div>
         <div class="toolbar-group">
+          <button class="icon" id="fitWidth" title="Fit to width">⬌</button>
           <label class="zoom-control" title="Zoom">
             🔍
             <input id="zoomSlider" type="range" min="50" max="200" value="110" />
