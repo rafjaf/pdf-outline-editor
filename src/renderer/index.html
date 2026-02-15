@@ -26,6 +26,10 @@
             <span>📄</span>
             <span>Save As</span>
           </button>
+          <button class="ghost" id="openSettings" title="LLM Settings">
+            <span>⚙️</span>
+            <span>Settings</span>
+          </button>
         </div>
       </header>
       <div class="unified-toolbar">
@@ -36,7 +40,7 @@
         <div class="toolbar-separator"></div>
         <div class="toolbar-group">
           <button class="icon" id="renameTitle" title="Rename (F2 or Enter)">✏️</button>
-          <button class="icon" id="setPage" title="Set target page">📍</button>
+          <button class="icon" id="setPage" title="Edit target page (⌘E)">📍</button>
           <button class="icon" id="deleteTitle" title="Delete (Del)">🗑️</button>
         </div>
         <div class="toolbar-separator"></div>
@@ -53,11 +57,15 @@
           <button class="icon" id="undo" title="Nothing to undo (⌘Z)" disabled>↶</button>
           <button class="icon" id="redo" title="Nothing to redo (⌘Y)" disabled>↷</button>
         </div>
+        <div class="toolbar-separator"></div>
+        <div class="toolbar-group">
+          <button class="icon" id="importToc" title="Import Table of Contents">📑</button>
+        </div>
         <div class="toolbar-spacer"></div>
         <div class="toolbar-group">
           <button class="icon" id="prevPage" title="Previous page">◀</button>
           <div class="page-indicator">
-            Page <span id="currentPage">1</span> / <span id="totalPages">1</span>
+            Page <input id="currentPageInput" type="text" value="1" aria-label="Current page" /> / <span id="totalPages">1</span>
           </div>
           <button class="icon" id="nextPage" title="Next page">▶</button>
         </div>
@@ -91,7 +99,7 @@
       <button data-action="add">Add title</button>
       <button data-action="addChild">Add nested title</button>
       <button data-action="rename">Rename</button>
-      <button data-action="setPage">Set target page...</button>
+      <button data-action="setPage">Edit target page...</button>
       <button data-action="delete">Delete</button>
       <hr />
       <button data-action="outdent">Decrease level</button>
@@ -101,11 +109,98 @@
     </div>
     <div class="modal" id="pageModal" style="display: none;">
       <div class="modal-content">
-        <div class="modal-title">Set Target Page</div>
+        <div class="modal-title">Edit Target Page</div>
         <input type="number" id="pageInput" min="1" placeholder="Page number" />
         <div class="modal-actions">
           <button id="pageModalCancel">Cancel</button>
           <button id="pageModalOk" class="primary">OK</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="settingsModal" style="display: none;">
+      <div class="modal-content modal-wide">
+        <div class="modal-title">LLM Settings</div>
+        <div class="settings-group">
+          <label class="settings-label">Provider:</label>
+          <select id="settingsProvider">
+            <option value="openai">OpenAI</option>
+            <option value="ollama">Ollama</option>
+          </select>
+        </div>
+        <div id="openaiSettings">
+          <div class="settings-group">
+            <label class="settings-label">API Key:</label>
+            <input type="password" id="settingsApiKey" placeholder="sk-...">
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">Model:</label>
+            <input type="text" id="settingsOpenaiModel" value="gpt-5-mini">
+          </div>
+        </div>
+        <div id="ollamaSettings" style="display: none;">
+          <div class="settings-group">
+            <label class="settings-label">Port:</label>
+            <input type="number" id="settingsOllamaPort" value="11434">
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">Model:</label>
+            <input type="text" id="settingsOllamaModel" value="llama3">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="settingsCancel">Cancel</button>
+          <button id="settingsSave" class="primary">Save</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="tocImportModal" style="display: none;">
+      <div class="modal-content modal-wide">
+        <div class="modal-title">Import Table of Contents</div>
+        <div class="import-top-controls">
+          <div class="import-field compact-field">
+            <label>Provider for this import:</label>
+            <select id="tocProviderOverride">
+              <option value="openai">OpenAI</option>
+              <option value="ollama">Ollama</option>
+            </select>
+          </div>
+          <div id="pdfModeGroup" class="import-field compact-field" style="display: none;">
+            <label>PDF extraction mode:</label>
+            <select id="tocPdfExtractMode">
+              <option value="auto">Auto detect</option>
+              <option value="text">Text</option>
+              <option value="vision">Vision (images)</option>
+            </select>
+          </div>
+        </div>
+        <div class="import-source-group">
+          <label class="radio-label">
+            <input type="radio" name="tocSource" value="external-pdf" checked>
+            Import from external PDF file
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="tocSource" value="external-text">
+            Import from external text file
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="tocSource" value="external-json">
+            Import from external JSON file
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="tocSource" value="current-pdf">
+            Use pages from current PDF
+          </label>
+        </div>
+        <div id="pageRangeGroup" class="import-field" style="display: none;">
+          <label>Page range (e.g. 3-5 or 1,3-5,7):</label>
+          <input type="text" id="tocPageRange" placeholder="3-5">
+        </div>
+        <div id="tocImportStatus" class="import-status"></div>
+        <div id="tocImportLog" class="import-log" aria-live="polite"></div>
+        <div class="modal-actions">
+          <button id="tocImportStart" class="primary">Import</button>
+          <button id="tocImportExport" disabled>Export JSON</button>
+          <button id="tocImportClose">Close</button>
         </div>
       </div>
     </div>

@@ -125,6 +125,22 @@ body {
   padding: 0 8px;
 }
 
+#currentPageInput {
+  width: 48px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: center;
+  background: var(--panel);
+  color: var(--text);
+}
+
+#currentPageInput:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .zoom-control {
   display: flex;
   align-items: center;
@@ -374,6 +390,20 @@ body {
   padding: 12px;
 }
 
+.pdf-page.pdf-page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: #ffffff;
+}
+
+.pdf-page-placeholder {
+  font-size: 13px;
+  color: var(--muted);
+  user-select: none;
+}
+
 .drop-zone {
   position: absolute;
   inset: 0;
@@ -467,7 +497,7 @@ body {
   margin-bottom: 16px;
 }
 
-.modal-content input {
+.modal-content input:not([type="radio"]) {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -495,6 +525,125 @@ body {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
+}
+
+/* Wide modal variant */
+.modal-content.modal-wide {
+  min-width: 640px;
+  max-width: 760px;
+}
+
+.import-top-controls {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.compact-field {
+  margin-bottom: 0;
+}
+
+.compact-field select,
+.compact-field input {
+  margin-bottom: 0;
+}
+
+/* Import TOC modal */
+.import-source-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.radio-label {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: start;
+  column-gap: 12px;
+  font-size: 14px;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.radio-label input[type="radio"] {
+  margin: 2px 0 0 0;
+}
+
+#tocPdfExtractMode {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--panel);
+}
+
+.import-field {
+  margin-bottom: 16px;
+}
+
+.import-field label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.import-status {
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 20px;
+  margin-bottom: 12px;
+}
+
+.import-log {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f9faff;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-y: auto;
+  max-height: 220px;
+  min-height: 120px;
+  margin-bottom: 12px;
+}
+
+/* Settings modal */
+.settings-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-label {
+  font-size: 14px;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.settings-group input,
+.settings-group select {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.settings-group select {
+  background: var(--panel);
+  cursor: pointer;
+}
+
+/* Unverified outline items (imported but not found on page) */
+.outline-item .outline-title.unverified {
+  color: #dc3545;
 }
 
 /* Drag and drop - no copy cursor */

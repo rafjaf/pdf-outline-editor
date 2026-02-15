@@ -2,7 +2,7 @@
  * File operations - load, save, and handle file dialogs
  */
 
-import { state, updateFileName, updateDirtyState, elements } from './state.js';
+import { state, updateFileName, updateDirtyState, elements, setToolbarEnabled } from './state.js';
 import { updateUndoRedoButtons } from './history.js';
 import { refreshOutline } from './outline-renderer.js';
 import { ensurePdfJsLoaded, getPdfjsLib, renderPdf, setPageIndicators } from './pdf-viewer.js';
@@ -42,6 +42,7 @@ export const loadPdfData = async ({ data, filePath, outline = [] }) => {
     setPageIndicators();
     updateUndoRedoButtons();
     updateFileName();
+    setToolbarEnabled(true);
     elements.dropZone.style.display = 'none';
     
     // Refresh outline BEFORE rendering PDF pages so it shows immediately

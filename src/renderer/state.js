@@ -27,11 +27,17 @@ export const elements = {
   outlineList: document.getElementById('outlineList'),
   dropZone: document.getElementById('dropZone'),
   contextMenu: document.getElementById('contextMenu'),
-  currentPage: document.getElementById('currentPage'),
+  currentPageInput: document.getElementById('currentPageInput'),
   totalPages: document.getElementById('totalPages'),
   undoBtn: document.getElementById('undo'),
   redoBtn: document.getElementById('redo'),
   fileName: document.getElementById('fileName')
+};
+
+export const setToolbarEnabled = (enabled) => {
+  document.querySelectorAll('.unified-toolbar button, .unified-toolbar input').forEach((element) => {
+    element.disabled = !enabled;
+  });
 };
 
 // Selection helpers

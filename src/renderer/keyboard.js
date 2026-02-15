@@ -102,6 +102,13 @@ export const setupKeyboardShortcuts = (outlineActions) => {
       }
       return;
     }
+
+    // Edit target page
+    if (isMeta && (event.key === 'e' || event.key === 'E')) {
+      event.preventDefault();
+      outlineActions.setPage();
+      return;
+    }
     
     // Arrow key navigation
     if (event.key === 'ArrowUp') {

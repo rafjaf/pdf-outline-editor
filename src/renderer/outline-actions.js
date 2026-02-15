@@ -80,25 +80,51 @@ export const deleteOutlineItem = () => {
 // Adjust indentation level of selected items
 export const adjustLevel = (delta) => {
   if (!hasSelection()) return;
-  const items = getSelectedItems();
-  if (items.length === 0) return;
+  const selectedIds = new Set(getSelectedItems().map(item => item.id));
+  if (selectedIds.size === 0) return;
   
   saveHistory(delta > 0 ? 'Indent titles' : 'Outdent titles');
-  
-  for (const item of items) {
-    const idx = state.outline.findIndex(o => o.id === item.id);
-    let newLevel = Math.max(0, item.level + delta);
-    
-    // Ensure logical hierarchy: can't exceed previous item's level + 1
-    if (idx > 0) {
-      const prevItem = state.outline[idx - 1];
-      newLevel = Math.min(newLevel, prevItem.level + 1);
-    } else {
-      // First item must be level 0
-      newLevel = Math.min(newLevel, 0);
+
+  const selectedIndices = state.outline
+    .map((item, idx) => (selectedIds.has(item.id) ? idx : -1))
+    .filter(idx => idx >= 0)
+    .sort((a, b) => a - b);
+
+  const rootIndices = selectedIndices.filter((idx) => {
+    const currentLevel = state.outline[idx].level;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (state.outline[i].level < currentLevel) {
+        return !selectedIds.has(state.outline[i].id);
+      }
     }
-    
-    item.level = newLevel;
+    return true;
+  });
+
+  for (const rootIdx of rootIndices) {
+    const rootItem = state.outline[rootIdx];
+    const rootOriginalLevel = rootItem.level;
+
+    let rootNewLevel = Math.max(0, rootOriginalLevel + delta);
+
+    if (rootIdx > 0) {
+      const prevItem = state.outline[rootIdx - 1];
+      rootNewLevel = Math.min(rootNewLevel, prevItem.level + 1);
+    } else {
+      rootNewLevel = 0;
+    }
+
+    const appliedDelta = rootNewLevel - rootOriginalLevel;
+    if (appliedDelta === 0) continue;
+
+    let endIdx = rootIdx;
+    for (let i = rootIdx + 1; i < state.outline.length; i++) {
+      if (state.outline[i].level <= rootOriginalLevel) break;
+      endIdx = i;
+    }
+
+    for (let i = rootIdx; i <= endIdx; i++) {
+      state.outline[i].level = Math.max(0, state.outline[i].level + appliedDelta);
+    }
   }
   
   // After adjusting, fix any children that now violate hierarchy
@@ -154,6 +180,7 @@ export const startRename = (elements) => {
   input.addEventListener('blur', () => {
     saveHistory('Rename title');
     item.title = input.value || 'Untitled';
+    delete item.unverified;
     if (refreshCallback) refreshCallback();
   });
   
@@ -179,8 +206,9 @@ export const setPageForSelected = (pageNumber) => {
   
   const maxPage = state.pdf?.numPages ?? 1;
   if (!isNaN(pageNumber) && pageNumber >= 1 && pageNumber <= maxPage) {
-    saveHistory('Set target page');
+    saveHistory('Edit target page');
     item.pageIndex = pageNumber - 1;
+    delete item.unverified;
     if (refreshCallback) refreshCallback();
   }
 };

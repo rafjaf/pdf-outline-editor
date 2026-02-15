@@ -15,7 +15,7 @@
  * - keyboard.js: Keyboard shortcuts
  */
 
-import { state, elements } from './state.js';
+import { state, elements, setToolbarEnabled } from './state.js';
 import { setRefreshCallback as setHistoryRefresh, undo, redo } from './history.js';
 import { 
   setRefreshCallback as setActionsRefresh,
@@ -49,6 +49,8 @@ import {
 import { openContextMenu, closeContextMenu, setupContextMenuHandlers } from './context-menu.js';
 import { openPageModal, setupPageModalHandlers } from './page-modal.js';
 import { setupKeyboardShortcuts } from './keyboard.js';
+import { openSettingsModal, setupSettingsModalHandlers } from './settings-modal.js';
+import { openTocImportModal, setupTocImportHandlers } from './toc-import.js';
 
 const { ipcRenderer } = require('electron');
 
@@ -80,6 +82,8 @@ setOutlineCallbacks({
 document.getElementById('openPdf').addEventListener('click', requestOpenPdf);
 document.getElementById('savePdf').addEventListener('click', requestSavePdf);
 document.getElementById('savePdfAs').addEventListener('click', requestSavePdfAs);
+document.getElementById('openSettings').addEventListener('click', openSettingsModal);
+document.getElementById('importToc').addEventListener('click', openTocImportModal);
 
 // Outline manipulation
 document.getElementById('addTitle').addEventListener('click', outlineActions.add);
@@ -106,6 +110,25 @@ document.getElementById('nextPage').addEventListener('click', () =>
   scrollToPage(Math.min(state.pdf?.numPages ?? 1, state.currentPage + 1))
 );
 document.getElementById('fitWidth').addEventListener('click', fitToWidth);
+
+const currentPageInput = document.getElementById('currentPageInput');
+currentPageInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  if (!state.pdf) return;
+
+  const requestedPage = parseInt(currentPageInput.value, 10);
+  if (Number.isNaN(requestedPage)) {
+    setPageIndicators();
+    return;
+  }
+
+  const clampedPage = Math.max(1, Math.min(state.pdf.numPages, requestedPage));
+  scrollToPage(clampedPage, 'auto');
+});
+
+currentPageInput.addEventListener('blur', () => {
+  setPageIndicators();
+});
 
 // Zoom control
 document.getElementById('zoomSlider').addEventListener('input', (e) => 
@@ -162,6 +185,8 @@ document.addEventListener('mousemove', (event) => {
 
 setupContextMenuHandlers(outlineActions);
 setupPageModalHandlers();
+setupSettingsModalHandlers();
+setupTocImportHandlers();
 setupKeyboardShortcuts(outlineActions);
 
 // ===== IPC Handlers =====
@@ -186,5 +211,6 @@ ipcRenderer.invoke('get-app-version').then((version) => {
   document.getElementById('appVersion').textContent = `v${version}`;
 });
 
+setToolbarEnabled(false);
 setPageIndicators();
 refreshOutline();

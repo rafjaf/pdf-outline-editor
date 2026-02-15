@@ -26,6 +26,19 @@ export const setCallbacks = ({ scrollToPage, openContextMenu, openPageModal }) =
 
 // Update toolbar and context menu button states
 export const updateButtonStates = () => {
+  if (!state.pdf) {
+    const buttonIds = [
+      'addTitle', 'addChild', 'renameTitle', 'setPage', 'deleteTitle',
+      'indentTitle', 'outdentTitle', 'moveUp', 'moveDown', 'expandAll',
+      'collapseAll', 'undo', 'redo', 'importToc', 'prevPage', 'nextPage',
+      'fitWidth', 'zoomSlider', 'currentPageInput'
+    ];
+    buttonIds.forEach((id) => {
+      const control = document.getElementById(id);
+      if (control) control.disabled = true;
+    });
+  }
+
   const single = hasSingleSelection();
   const any = hasSelection();
   
@@ -130,7 +143,7 @@ export const refreshOutline = () => {
 
     // Title text
     const title = document.createElement('span');
-    title.className = 'outline-title';
+    title.className = 'outline-title' + (item.unverified ? ' unverified' : '');
     title.textContent = item.title;
     title.style.flex = '1';
 

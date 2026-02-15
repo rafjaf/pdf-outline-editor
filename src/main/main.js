@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readFile, writeFile, copyFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { applyOutlineToPdf, extractOutline } from '../shared/outline.js';
+import { loadSettings, saveSettings } from './settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -213,5 +214,42 @@ ipcMain.handle('save-pdf-as', async (_event, { sourcePath, outline }) => {
   const sourceData = await readFile(sourcePath);
   const updated = await applyOutlineToPdf(sourceData, outline);
   await writeFile(filePath, Buffer.from(updated));
+  return { filePath };
+});
+
+// Settings
+ipcMain.handle('get-settings', async () => {
+  return loadSettings();
+});
+
+ipcMain.handle('save-settings', async (_event, settings) => {
+  return saveSettings(settings);
+});
+
+// Open file dialog for TOC import (PDF or text)
+ipcMain.handle('open-toc-file-dialog', async (_event, filter) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Select TOC Source File',
+    filters: [filter],
+    properties: ['openFile']
+  });
+
+  if (canceled || filePaths.length === 0) return null;
+
+  const filePath = filePaths[0];
+  const data = await readFile(filePath);
+  return { filePath, data: data.buffer };
+});
+
+ipcMain.handle('save-toc-json-dialog', async (_event, payload) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Export Extracted TOC JSON',
+    defaultPath: 'toc.json',
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  });
+
+  if (canceled || !filePath) return null;
+
+  await writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
   return { filePath };
 });

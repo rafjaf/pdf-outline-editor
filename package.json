@@ -1,6 +1,6 @@
 {
   "name": "pdf-outline-editor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Desktop app to edit PDF outlines",
   "main": "src/main/main.js",
   "author": "Rafaël Jafferali",
