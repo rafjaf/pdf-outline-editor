@@ -101,7 +101,8 @@ const setImportRunningState = (running) => {
   const exportBtn = document.getElementById('tocImportExport');
   startBtn.disabled = running;
   closeBtn.textContent = running ? 'Cancel' : 'Close';
-  exportBtn.disabled = running || !lastExtractedEntries || lastExtractedEntries.length === 0;
+  // Export button stays enabled once entries are available, even during matching
+  exportBtn.disabled = !lastExtractedEntries || lastExtractedEntries.length === 0;
 };
 
 const throwIfAborted = (signal) => {
@@ -178,60 +179,155 @@ const extractTextFromPdf = async (pdfDoc, pageNumbers = null, signal = null) => 
   return texts;
 };
 
-const extractAllPageTexts = async (pdfDoc, signal = null) => {
-  const texts = [];
-  for (let i = 1; i <= pdfDoc.numPages; i++) {
-    throwIfAborted(signal);
-    const page = await pdfDoc.getPage(i);
-    const textContent = await page.getTextContent();
-    texts.push(textContent.items.map(item => item.str).join(' '));
+// ===== Combined Page Data Extraction =====
+
+/**
+ * Extract a candidate page number from a single text line.
+ * Returns the number if found, or null.
+ */
+const extractPageNumberFromLine = (lineText) => {
+  if (!lineText) return null;
+  const trimmed = lineText.trim();
+
+  // Exact match: line is just a number (1-4 digits)
+  if (/^\d{1,4}$/.test(trimmed)) return parseInt(trimmed, 10);
+
+  // Decorated pattern: "— 101 —", "- 101 -", "| 101 |", etc.
+  const decoratedMatch = trimmed.match(/^[\s—–\-|.·•*_~]+?(\d{1,4})[\s—–\-|.·•*_~]*$/);
+  if (decoratedMatch) return parseInt(decoratedMatch[1], 10);
+
+  // Number at the edge of a reasonably short line (header/footer)
+  if (trimmed.length < 120) {
+    // End of line (common position for page numbers)
+    const endMatch = trimmed.match(/[\s—–\-|,]+(\d{1,4})$/);
+    if (endMatch) return parseInt(endMatch[1], 10);
+
+    // Start of line, but NOT if followed by "." or ")" (section numbering like "1.", "2)")
+    const startMatch = trimmed.match(/^(\d{1,4})[\s—–\-|]/);
+    if (startMatch && !/^\d+[.°):]/.test(trimmed)) {
+      return parseInt(startMatch[1], 10);
+    }
   }
-  return texts; // 0-indexed: texts[0] = page 1
+
+  return null;
 };
 
-const extractPrintedPageLabels = async (pdfDoc, signal = null) => {
-  const labelsPerPage = [];
+/**
+ * Try extracting a page number from an ordered list of candidate lines.
+ * First match wins.
+ */
+const extractPageNumberFromLines = (lines) => {
+  for (const line of lines) {
+    const num = extractPageNumberFromLine(line);
+    if (num !== null) return num;
+  }
+  return null;
+};
+
+/**
+ * Score how many consecutive pages in a number sequence increment by exactly 1.
+ * Higher score = more consistent = more likely to be actual page numbers.
+ */
+const scoreConsistency = (nums) => {
+  let score = 0;
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] !== null && nums[i - 1] !== null && nums[i] === nums[i - 1] + 1) {
+      score++;
+    }
+  }
+  return score;
+};
+
+/**
+ * Extract both full text and page-number candidates from every PDF page in a single pass.
+ * Returns { pageTexts: string[], pageCandidates: { top: number|null, bottom: number|null }[] }
+ */
+const extractAllPageData = async (pdfDoc, signal = null, logFn = null) => {
+  const pageTexts = [];      // 0-indexed: pageTexts[0] = PDF page 1
+  const pageCandidates = []; // 0-indexed: { top, bottom } for each page
 
   for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
     throwIfAborted(signal);
+    if (logFn && (pageNum % 50 === 0 || pageNum === 1)) {
+      logFn(`  Scanning page ${pageNum}/${pdfDoc.numPages}...`);
+    }
+
     const page = await pdfDoc.getPage(pageNum);
     const textContent = await page.getTextContent();
-    const lineMap = new Map();
 
+    // Full text for title matching
+    pageTexts.push(textContent.items.map(item => item.str).join(' '));
+
+    // Group text items into lines by Y coordinate for page-number detection
+    const lineMap = new Map();
     for (const item of textContent.items) {
       const text = String(item.str || '').trim();
       if (!text) continue;
-
       const y = Math.round((item.transform?.[5] || 0) / 3) * 3;
       if (!lineMap.has(y)) lineMap.set(y, []);
       lineMap.get(y).push(text);
     }
 
-    const sortedLines = Array.from(lineMap.entries())
-      .sort((a, b) => b[0] - a[0])
-      .map(([, lineItems]) => lineItems.join(' ').trim())
-      .filter(Boolean);
-
-    const candidateLines = [];
-    if (sortedLines[0]) candidateLines.push(sortedLines[0]);
-    if (sortedLines.length > 1) candidateLines.push(sortedLines[sortedLines.length - 1]);
-
-    const pageLabels = new Set();
-    for (const line of candidateLines) {
-      const nums = line.match(/\b\d{1,4}\b/g) || [];
-      nums.forEach(n => pageLabels.add(parseInt(n, 10)));
-
-      const romans = line.match(/\b[ivxlcdmIVXLCDM]{1,10}\b/g) || [];
-      romans.forEach((romanToken) => {
-        const romanValue = fromRoman(romanToken);
-        if (romanValue) pageLabels.add(romanValue);
-      });
+    if (lineMap.size === 0) {
+      pageCandidates.push({ top: null, bottom: null });
+      continue;
     }
 
-    labelsPerPage.push(pageLabels);
+    // Sort Y values descending (top of page = high Y first)
+    const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
+
+    // Top area: first 2 lines (highest Y values)
+    const topLines = sortedYs.slice(0, 2)
+      .map(y => lineMap.get(y).join(' ').trim());
+
+    // Bottom area: last 2 lines (lowest Y values), reversed so outermost is first
+    const bottomLines = [...sortedYs.slice(-2)].reverse()
+      .map(y => lineMap.get(y).join(' ').trim());
+
+    pageCandidates.push({
+      top: extractPageNumberFromLines(topLines),
+      bottom: extractPageNumberFromLines(bottomLines)
+    });
   }
 
-  return labelsPerPage;
+  return { pageTexts, pageCandidates };
+};
+
+/**
+ * Build a mapping from printed page numbers to PDF page indices (0-based).
+ * Determines whether page numbers are at the top or bottom of the page
+ * by comparing sequence consistency.
+ */
+const buildPageNumberMap = (pageCandidates, logFn = null) => {
+  const topNums = pageCandidates.map(c => c.top);
+  const bottomNums = pageCandidates.map(c => c.bottom);
+
+  const topScore = scoreConsistency(topNums);
+  const bottomScore = scoreConsistency(bottomNums);
+
+  const useTop = topScore > bottomScore;
+  const chosenNums = useTop ? topNums : bottomNums;
+  const position = useTop ? 'top' : 'bottom';
+
+  const printedToPdf = new Map(); // printedPageNumber → pdfPageIndex (0-based)
+  const pdfToPrinted = new Map(); // pdfPageIndex (0-based) → printedPageNumber
+
+  for (let i = 0; i < chosenNums.length; i++) {
+    const num = chosenNums[i];
+    if (num !== null && num > 0) {
+      // First occurrence wins in case of duplicates
+      if (!printedToPdf.has(num)) {
+        printedToPdf.set(num, i);
+      }
+      pdfToPrinted.set(i, num);
+    }
+  }
+
+  if (logFn) {
+    logFn(`[System] Page numbers detected at ${position} of pages (consistency: top=${topScore}, bottom=${bottomScore}). ${printedToPdf.size} pages mapped.`);
+  }
+
+  return { printedToPdf, pdfToPrinted, position };
 };
 
 // ===== Image Rendering (for image-based PDFs) =====
@@ -619,111 +715,123 @@ const titleMatchesPage = (title, pageText) => {
   return false;
 };
 
-const verifyTitleAroundPage = (title, pageTexts, pageIdx, maxDistance = 2) => {
-  if (pageIdx < 0 || pageIdx >= pageTexts.length) return false;
-  if (titleMatchesPage(title, pageTexts[pageIdx])) return true;
-
-  for (let distance = 1; distance <= maxDistance; distance++) {
-    const left = pageIdx - distance;
-    const right = pageIdx + distance;
-
-    if (left >= 0 && titleMatchesPage(title, pageTexts[left])) return true;
-    if (right < pageTexts.length && titleMatchesPage(title, pageTexts[right])) return true;
+/**
+ * Check if a title matches on the target page or within a small distance.
+ * Returns the matched page index, or null if no match.
+ */
+const titleMatchesPageArea = (title, pageTexts, targetPageIdx, maxDistance = 1) => {
+  if (targetPageIdx >= 0 && targetPageIdx < pageTexts.length &&
+      titleMatchesPage(title, pageTexts[targetPageIdx])) {
+    return targetPageIdx;
   }
 
-  return false;
+  for (let d = 1; d <= maxDistance; d++) {
+    const left = targetPageIdx - d;
+    const right = targetPageIdx + d;
+    if (left >= 0 && titleMatchesPage(title, pageTexts[left])) return left;
+    if (right < pageTexts.length && titleMatchesPage(title, pageTexts[right])) return right;
+  }
+
+  return null;
 };
 
-const inferMissingPrintedLabels = (labelsPerPage) => {
-  const inferred = labelsPerPage.map(set => new Set(set));
-  const anchors = [];
+/**
+ * Search for a title's text across a range of PDF pages.
+ * Returns the first matching page index, or null.
+ */
+const searchTitleInRange = (title, pageTexts, lowerBound, upperBound) => {
+  const start = Math.max(0, lowerBound);
+  const end = Math.min(pageTexts.length - 1, upperBound);
+  for (let i = start; i <= end; i++) {
+    if (titleMatchesPage(title, pageTexts[i])) return i;
+  }
+  return null;
+};
 
-  for (let pageIdx = 0; pageIdx < inferred.length; pageIdx++) {
-    const numericLabels = Array.from(inferred[pageIdx]).filter(v => Number.isInteger(v) && v > 0);
-    if (numericLabels.length > 0) {
-      anchors.push({ pageIdx, label: Math.min(...numericLabels) });
+/**
+ * Two-pass matching of TOC entries against the PDF.
+ *
+ * Pass 1 – page-number lookup:
+ *   For each entry whose printed page number is in the page map, look up the
+ *   corresponding PDF page and check if the title text appears on it (or
+ *   within ±2 pages to handle unnumbered chapter openers).
+ *   • Title found  → verified  (black)
+ *   • Title absent → uncertain (orange)
+ *
+ * Pass 2 – title search:
+ *   For entries with no page match in the map, search for the title between
+ *   the closest resolved neighbours.
+ *   • Title found  → uncertain  (orange)
+ *   • Title absent → unverified (red) – fall back to last known page
+ */
+const matchEntriesAgainstPdf = (entries, pageTexts, printedToPdf, logFn) => {
+  const results = new Array(entries.length).fill(null);
+
+  // ---- Pass 1 ----
+  logFn('[System] Pass 1: matching entries by printed page number...');
+  let pass1Verified = 0;
+  let pass1Uncertain = 0;
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (entry.page <= 0 || !printedToPdf.has(entry.page)) continue;
+
+    const pdfPageIdx = printedToPdf.get(entry.page);
+    const titlePageIdx = titleMatchesPageArea(entry.title, pageTexts, pdfPageIdx, 2);
+
+    if (titlePageIdx !== null) {
+      results[i] = { pageIndex: titlePageIdx, confidence: 'verified' };
+      pass1Verified++;
+    } else {
+      results[i] = { pageIndex: pdfPageIdx, confidence: 'uncertain' };
+      pass1Uncertain++;
     }
   }
 
-  if (anchors.length === 0) return inferred;
+  logFn(`[System] Pass 1 result: ${pass1Verified + pass1Uncertain}/${entries.length} resolved (${pass1Verified} verified, ${pass1Uncertain} uncertain).`);
 
-  for (let i = 0; i < anchors.length - 1; i++) {
-    const left = anchors[i];
-    const right = anchors[i + 1];
-    const pageDistance = right.pageIdx - left.pageIdx;
-    const labelDistance = right.label - left.label;
+  // ---- Pass 2 ----
+  const unresolvedCount = results.filter(r => r === null).length;
+  if (unresolvedCount > 0) {
+    logFn(`[System] Pass 2: searching for ${unresolvedCount} remaining entries by title text...`);
+    let pass2Found = 0;
+    let pass2NotFound = 0;
 
-    if (pageDistance <= 0 || labelDistance !== pageDistance) continue;
+    for (let i = 0; i < entries.length; i++) {
+      if (results[i] !== null) continue;
 
-    for (let pageIdx = left.pageIdx; pageIdx <= right.pageIdx; pageIdx++) {
-      inferred[pageIdx].add(left.label + (pageIdx - left.pageIdx));
-    }
-  }
+      // Determine search bounds from nearest resolved neighbours
+      let lowerBound = 0;
+      let upperBound = pageTexts.length - 1;
 
-  const first = anchors[0];
-  for (let pageIdx = first.pageIdx - 1; pageIdx >= 0; pageIdx--) {
-    const guessed = first.label - (first.pageIdx - pageIdx);
-    if (guessed > 0) inferred[pageIdx].add(guessed);
-  }
-
-  const last = anchors[anchors.length - 1];
-  for (let pageIdx = last.pageIdx + 1; pageIdx < inferred.length; pageIdx++) {
-    inferred[pageIdx].add(last.label + (pageIdx - last.pageIdx));
-  }
-
-  return inferred;
-};
-
-const detectPageOffset = (entries, pageTexts) => {
-  const samplesToCheck = entries.filter(e => e.page > 0).slice(0, 10);
-  if (samplesToCheck.length === 0) return 0;
-
-  let bestOffset = 0;
-  let bestScore = 0;
-  const maxOffset = pageTexts.length;
-
-  for (let offset = -20; offset <= maxOffset; offset++) {
-    let score = 0;
-    for (const entry of samplesToCheck) {
-      const pageIdx = entry.page + offset - 1; // 0-based index
-      if (pageIdx >= 0 && pageIdx < pageTexts.length) {
-        if (titleMatchesPage(entry.title, pageTexts[pageIdx])) {
-          score++;
+      for (let j = i - 1; j >= 0; j--) {
+        if (results[j] !== null) {
+          lowerBound = results[j].pageIndex;
+          break;
         }
       }
+      for (let j = i + 1; j < entries.length; j++) {
+        if (results[j] !== null) {
+          upperBound = results[j].pageIndex;
+          break;
+        }
+      }
+
+      const found = searchTitleInRange(entries[i].title, pageTexts, lowerBound, upperBound);
+
+      if (found !== null) {
+        results[i] = { pageIndex: found, confidence: 'uncertain' };
+        pass2Found++;
+      } else {
+        results[i] = { pageIndex: Math.max(0, lowerBound), confidence: 'unverified' };
+        pass2NotFound++;
+      }
     }
-    if (score > bestScore) {
-      bestScore = score;
-      bestOffset = offset;
-    }
+
+    logFn(`[System] Pass 2 result: ${pass2Found} found by title, ${pass2NotFound} not found.`);
   }
 
-  return bestOffset;
-};
-
-const detectPrintedPageOffset = (entries, labelsPerPage) => {
-  const offsetVotes = new Map();
-
-  for (const entry of entries) {
-    if (!entry.page || entry.page <= 0) continue;
-
-    for (let pageIndex = 0; pageIndex < labelsPerPage.length; pageIndex++) {
-      if (!labelsPerPage[pageIndex].has(entry.page)) continue;
-      const offset = pageIndex + 1 - entry.page;
-      offsetVotes.set(offset, (offsetVotes.get(offset) || 0) + 1);
-    }
-  }
-
-  let bestOffset = null;
-  let bestVotes = 0;
-  for (const [offset, votes] of offsetVotes.entries()) {
-    if (votes > bestVotes) {
-      bestVotes = votes;
-      bestOffset = offset;
-    }
-  }
-
-  return bestVotes > 0 ? { offset: bestOffset, votes: bestVotes } : null;
+  return results;
 };
 
 // ===== Main Import Flow =====
@@ -900,57 +1008,43 @@ const startImport = async () => {
       page: entry.page,
       level: entry.level
     }));
-    setImportRunningState(true);
+    // Enable JSON export as soon as entries are available (even while matching)
+    document.getElementById('tocImportExport').disabled = false;
 
     // Step 4: Match against current PDF
     setStatus(`Matching ${entries.length} entries against current PDF...`);
-    appendLogLine(`[System] Matching ${entries.length} entries against current PDF pages.`);
-    const pageTexts = await extractAllPageTexts(state.pdf, signal);
-    const rawPrintedLabels = await extractPrintedPageLabels(state.pdf, signal);
-    const printedLabels = inferMissingPrintedLabels(rawPrintedLabels);
+    appendLogLine(`\n[System] Matching ${entries.length} entries against current PDF pages.`);
+
+    appendLogLine('[System] Scanning all PDF pages for page numbers and text...');
+    const { pageTexts, pageCandidates } = await extractAllPageData(
+      state.pdf, signal, (msg) => appendLogLine(msg)
+    );
     throwIfAborted(signal);
 
-    // Detect page offset (difference between TOC page numbers and actual PDF pages)
-    const printedOffsetResult = detectPrintedPageOffset(entries, printedLabels);
-    const offset = printedOffsetResult?.offset ?? detectPageOffset(entries, pageTexts);
-    if (printedOffsetResult) {
-      appendLogLine(`[System] Detected page offset from printed page numbers: ${offset > 0 ? '+' : ''}${offset} (${printedOffsetResult.votes} matches).`);
-    } else {
-      appendLogLine(`[System] Detected page offset from title matching: ${offset > 0 ? '+' : ''}${offset}.`);
-    }
+    const { printedToPdf } = buildPageNumberMap(pageCandidates, (msg) => appendLogLine(msg));
 
-    // Create outline items with verification
-    const newOutline = entries.map(entry => {
-      let pageIdx = Math.max(0, Math.min(
-        state.pdf.numPages - 1,
-        entry.page > 0 ? entry.page + offset - 1 : 0
-      ));
+    // Two-pass matching: page-number lookup then title search
+    const matchResults = matchEntriesAgainstPdf(
+      entries, pageTexts, printedToPdf, (msg) => appendLogLine(msg)
+    );
 
-      if (entry.page > 0 && !printedLabels[pageIdx]?.has(entry.page)) {
-        for (let distance = 1; distance <= 5; distance++) {
-          const left = pageIdx - distance;
-          const right = pageIdx + distance;
-          if (left >= 0 && printedLabels[left]?.has(entry.page)) {
-            pageIdx = left;
-            break;
-          }
-          if (right < printedLabels.length && printedLabels[right]?.has(entry.page)) {
-            pageIdx = right;
-            break;
-          }
-        }
-      }
-
-      // Verify that the title text appears on the target page
-      const verified = verifyTitleAroundPage(entry.title, pageTexts, pageIdx, 2);
-
-      return {
+    // Build outline items from match results
+    const newOutline = entries.map((entry, i) => {
+      const result = matchResults[i];
+      const item = {
         id: crypto.randomUUID(),
         title: entry.title,
-        pageIndex: pageIdx,
-        level: entry.level - 1, // Convert from 1-based (LLM) to 0-based (internal)
-        ...(verified ? {} : { unverified: true })
+        pageIndex: result.pageIndex,
+        level: entry.level - 1 // Convert from 1-based (LLM) to 0-based (internal)
       };
+
+      if (result.confidence === 'uncertain') {
+        item.uncertain = true;
+      } else if (result.confidence === 'unverified') {
+        item.unverified = true;
+      }
+
+      return item;
     });
 
     // Step 5: Apply to outline
@@ -960,13 +1054,15 @@ const startImport = async () => {
     state.lastSelectedId = null;
     refreshOutline();
 
-    const verifiedCount = newOutline.filter(i => !i.unverified).length;
-    const unverifiedCount = newOutline.length - verifiedCount;
+    const verifiedCount = newOutline.filter(i => !i.unverified && !i.uncertain).length;
+    const uncertainCount = newOutline.filter(i => i.uncertain).length;
+    const unverifiedCount = newOutline.filter(i => i.unverified).length;
 
-    let summary = `Imported ${newOutline.length} entries.`;
-    if (offset !== 0) summary += ` Page offset: ${offset > 0 ? '+' : ''}${offset}.`;
-    if (unverifiedCount > 0) summary += ` ${unverifiedCount} not verified (shown in red).`;
-    else summary += ' All entries verified.';
+    let summary = `Imported ${newOutline.length} entries:`;
+    summary += ` ${verifiedCount} verified`;
+    if (uncertainCount > 0) summary += `, ${uncertainCount} uncertain (orange)`;
+    if (unverifiedCount > 0) summary += `, ${unverifiedCount} not found (red)`;
+    summary += '.';
 
     setStatus(summary);
     appendLogLine(`[System] ${summary}`);

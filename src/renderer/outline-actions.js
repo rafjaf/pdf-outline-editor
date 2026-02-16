@@ -181,6 +181,7 @@ export const startRename = (elements) => {
     saveHistory('Rename title');
     item.title = input.value || 'Untitled';
     delete item.unverified;
+    delete item.uncertain;
     if (refreshCallback) refreshCallback();
   });
   
@@ -209,6 +210,7 @@ export const setPageForSelected = (pageNumber) => {
     saveHistory('Edit target page');
     item.pageIndex = pageNumber - 1;
     delete item.unverified;
+    delete item.uncertain;
     if (refreshCallback) refreshCallback();
   }
 };

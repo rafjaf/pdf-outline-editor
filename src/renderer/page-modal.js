@@ -36,10 +36,19 @@ export const confirmPageModal = () => {
   closePageModal();
 };
 
+// Assign selected item to the current viewer page
+export const setCurrentPageInModal = () => {
+  if (!hasSingleSelection()) return;
+  const currentPage = state.currentPage;
+  setPageForSelected(currentPage);
+  closePageModal();
+};
+
 // Setup modal event handlers
 export const setupPageModalHandlers = () => {
   document.getElementById('pageModalCancel').addEventListener('click', closePageModal);
   document.getElementById('pageModalOk').addEventListener('click', confirmPageModal);
+  document.getElementById('pageModalCurrent').addEventListener('click', setCurrentPageInModal);
   
   document.getElementById('pageInput').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {

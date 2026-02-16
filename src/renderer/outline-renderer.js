@@ -143,7 +143,7 @@ export const refreshOutline = () => {
 
     // Title text
     const title = document.createElement('span');
-    title.className = 'outline-title' + (item.unverified ? ' unverified' : '');
+    title.className = 'outline-title' + (item.unverified ? ' unverified' : item.uncertain ? ' uncertain' : '');
     title.textContent = item.title;
     title.style.flex = '1';
 

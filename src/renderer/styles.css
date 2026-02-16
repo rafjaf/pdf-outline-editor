@@ -646,6 +646,11 @@ body {
   color: #dc3545;
 }
 
+/* Uncertain outline items (partially matched - page or title found, not both) */
+.outline-item .outline-title.uncertain {
+  color: #e67e22;
+}
+
 /* Drag and drop - no copy cursor */
 .outline-item[draggable="true"] {
   cursor: grab;
