@@ -12,6 +12,7 @@
     "download:fixture": "node scripts/download-fixture.js",
     "lint": "node scripts/lint-config.js",
     "build": "electron-builder",
+    "build:downloads": "electron-builder -c.directories.output=\"$HOME/Downloads/PDF-Outline-Editor/\"",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
     "build:linux": "electron-builder --linux"
