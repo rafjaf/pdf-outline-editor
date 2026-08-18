@@ -14,6 +14,9 @@ const DEFAULT_SETTINGS = {
   llmProvider: 'openai',
   openaiApiKey: '',
   openaiModel: 'gpt-5-mini',
+  openaiCompatibleUrl: '',
+  openaiCompatibleApiKey: '',
+  openaiCompatibleModel: '',
   ollamaPort: 11434,
   ollamaModel: 'llama3'
 };
@@ -33,6 +36,9 @@ export const saveSettings = async (settings) => {
     llmProvider: settings.llmProvider || DEFAULT_SETTINGS.llmProvider,
     openaiApiKey: settings.openaiApiKey || '',
     openaiModel: settings.openaiModel || DEFAULT_SETTINGS.openaiModel,
+    openaiCompatibleUrl: settings.openaiCompatibleUrl?.trim() || '',
+    openaiCompatibleApiKey: settings.openaiCompatibleApiKey || '',
+    openaiCompatibleModel: settings.openaiCompatibleModel?.trim() || '',
     ollamaPort: settings.ollamaPort || DEFAULT_SETTINGS.ollamaPort,
     ollamaModel: settings.ollamaModel || DEFAULT_SETTINGS.ollamaModel
   };

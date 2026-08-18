@@ -1,6 +1,7 @@
 /**
  * TOC Import - Extract a table of contents from an external source
- * using an LLM (OpenAI or Ollama) and match it against the current PDF.
+ * using an LLM (OpenAI, an OpenAI-compatible server, or Ollama) and match it
+ * against the current PDF.
  */
 
 import { state } from './state.js';
@@ -392,15 +393,28 @@ Return format: {"entries": [{"title": "...", "page": 1, "level": 1}, ...]}`;
 
 // ===== LLM API Calls =====
 
-const callOpenAI = async (settings, messages, { onChunk, signal }) => {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+const openAICompatibleEndpoint = (baseUrl) => {
+  const url = new URL(baseUrl);
+  const path = url.pathname.replace(/\/+$/, '');
+
+  if (!path.endsWith('/chat/completions')) {
+    url.pathname = path.endsWith('/v1')
+      ? `${path}/chat/completions`
+      : `${path}/v1/chat/completions`;
+  }
+
+  return url.toString();
+};
+
+const callOpenAIChatCompletions = async ({ url, apiKey, model, providerName }, messages, { onChunk, signal }) => {
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${settings.openaiApiKey}`
-    },
+    headers,
     body: JSON.stringify({
-      model: settings.openaiModel,
+      model,
       messages,
       temperature: 1,
       response_format: { type: 'json_object' },
@@ -411,11 +425,11 @@ const callOpenAI = async (settings, messages, { onChunk, signal }) => {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `OpenAI API error: ${response.status}`);
+    throw new Error(err.error?.message || `${providerName} API error: ${response.status}`);
   }
 
   if (!response.body) {
-    throw new Error('OpenAI response stream is unavailable');
+    throw new Error(`${providerName} response stream is unavailable`);
   }
 
   const reader = response.body.getReader();
@@ -519,9 +533,18 @@ const callOllama = async (settings, messages, { onChunk, signal }) => {
 const callLLM = async (settings, { text, images }, { onChunk, signal }) => {
   const isVision = images && images.length > 0;
 
-  if (settings.llmProvider === 'openai') {
+  if (settings.llmProvider === 'openai' || settings.llmProvider === 'openai-compatible') {
+    const isCompatible = settings.llmProvider === 'openai-compatible';
     if (!settings.openaiApiKey) {
-      throw new Error('OpenAI API key not configured. Please set it in Settings.');
+      if (!isCompatible) {
+        throw new Error('OpenAI API key not configured. Please set it in Settings.');
+      }
+    }
+    if (isCompatible && !settings.openaiCompatibleUrl) {
+      throw new Error('OpenAI-compatible URL not configured. Please set it in Settings.');
+    }
+    if (isCompatible && !settings.openaiCompatibleModel) {
+      throw new Error('OpenAI-compatible model not configured. Please set it in Settings.');
     }
 
     let userContent;
@@ -542,7 +565,21 @@ const callLLM = async (settings, { text, images }, { onChunk, signal }) => {
       { role: 'user', content: userContent }
     ];
 
-    return callOpenAI(settings, messages, { onChunk, signal });
+    const connection = isCompatible
+      ? {
+          url: openAICompatibleEndpoint(settings.openaiCompatibleUrl),
+          apiKey: settings.openaiCompatibleApiKey,
+          model: settings.openaiCompatibleModel,
+          providerName: 'OpenAI-compatible'
+        }
+      : {
+          url: 'https://api.openai.com/v1/chat/completions',
+          apiKey: settings.openaiApiKey,
+          model: settings.openaiModel,
+          providerName: 'OpenAI'
+        };
+
+    return callOpenAIChatCompletions(connection, messages, { onChunk, signal });
 
   } else if (settings.llmProvider === 'ollama') {
     let messages;
@@ -962,7 +999,9 @@ const startImport = async () => {
       // Step 2: Call LLM
       const providerLabel = importSettings.llmProvider === 'openai'
         ? `OpenAI (${importSettings.openaiModel})`
-        : `Ollama (${importSettings.ollamaModel})`;
+        : importSettings.llmProvider === 'openai-compatible'
+          ? `OpenAI compatible (${importSettings.openaiCompatibleModel})`
+          : `Ollama (${importSettings.ollamaModel})`;
       setStatus(`Calling ${providerLabel}... This may take a moment.`);
       appendLogLine(`[System] Calling ${providerLabel}.`);
       startWaitingDots();

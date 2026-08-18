@@ -2,6 +2,8 @@
 
 All notable changes to PDF Outline Editor are documented here.
 
+## [0.3.2] - Adding OpenAI compatible endpoint
+
 ## [0.3.0] - Refactoring Release
 
 ### Changed - Code Architecture

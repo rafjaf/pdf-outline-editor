@@ -1,6 +1,6 @@
 {
   "name": "pdf-outline-editor",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Desktop app to edit PDF outlines",
   "main": "src/main/main.js",
   "author": "Rafaël Jafferali",
@@ -13,7 +13,7 @@
     "lint": "node scripts/lint-config.js",
     "build": "electron-builder",
     "build:downloads": "electron-builder -c.directories.output=\"$HOME/Downloads/PDF-Outline-Editor/\"",
-    "build:mac": "electron-builder --mac",
+    "build:mac": "electron-builder --mac -c.directories.output=\"$HOME/Downloads/PDF-Outline-Editor/\"",
     "build:win": "electron-builder --win",
     "build:linux": "electron-builder --linux"
   },
