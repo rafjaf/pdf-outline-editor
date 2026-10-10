@@ -9,6 +9,8 @@ import { saveHistory } from './history.js';
 import { refreshOutline } from './outline-renderer.js';
 import { getSettings } from './settings-modal.js';
 import { ensurePdfJsLoaded, getPdfjsLib } from './pdf-viewer.js';
+import { detectPdfHeadings } from './heading-detection.js';
+import { refineHeadingsWithAi } from '../shared/heading-ai.js';
 
 const { ipcRenderer } = require('electron');
 
@@ -135,20 +137,6 @@ const parsePageRange = (rangeStr, maxPage) => {
   return Array.from(pages).sort((a, b) => a - b);
 };
 
-const fromRoman = (text) => {
-  if (!text) return null;
-  const roman = text.toUpperCase().trim();
-  if (!/^[IVXLCDM]+$/.test(roman)) return null;
-  const values = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
-  let total = 0;
-  for (let i = 0; i < roman.length; i++) {
-    const curr = values[roman[i]];
-    const next = values[roman[i + 1]] || 0;
-    total += curr < next ? -curr : curr;
-  }
-  return total > 0 ? total : null;
-};
-
 const parseEntriesPayload = (payload) => {
   const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
   const entries = parsed.entries || parsed.toc || parsed.items || parsed;
@@ -175,160 +163,12 @@ const extractTextFromPdf = async (pdfDoc, pageNumbers = null, signal = null) => 
     const textContent = await page.getTextContent();
     const text = textContent.items.map(item => item.str).join(' ');
     texts.push({ pageNum, text });
+    // Cached PDF.js responses can all resolve as microtasks; yield periodically
+    // so progress paints and the Cancel button receives events during reads.
+    if (texts.length % 10 === 0) await new Promise(resolve => setTimeout(resolve, 0));
   }
 
   return texts;
-};
-
-// ===== Combined Page Data Extraction =====
-
-/**
- * Extract a candidate page number from a single text line.
- * Returns the number if found, or null.
- */
-const extractPageNumberFromLine = (lineText) => {
-  if (!lineText) return null;
-  const trimmed = lineText.trim();
-
-  // Exact match: line is just a number (1-4 digits)
-  if (/^\d{1,4}$/.test(trimmed)) return parseInt(trimmed, 10);
-
-  // Decorated pattern: "— 101 —", "- 101 -", "| 101 |", etc.
-  const decoratedMatch = trimmed.match(/^[\s—–\-|.·•*_~]+?(\d{1,4})[\s—–\-|.·•*_~]*$/);
-  if (decoratedMatch) return parseInt(decoratedMatch[1], 10);
-
-  // Number at the edge of a reasonably short line (header/footer)
-  if (trimmed.length < 120) {
-    // End of line (common position for page numbers)
-    const endMatch = trimmed.match(/[\s—–\-|,]+(\d{1,4})$/);
-    if (endMatch) return parseInt(endMatch[1], 10);
-
-    // Start of line, but NOT if followed by "." or ")" (section numbering like "1.", "2)")
-    const startMatch = trimmed.match(/^(\d{1,4})[\s—–\-|]/);
-    if (startMatch && !/^\d+[.°):]/.test(trimmed)) {
-      return parseInt(startMatch[1], 10);
-    }
-  }
-
-  return null;
-};
-
-/**
- * Try extracting a page number from an ordered list of candidate lines.
- * First match wins.
- */
-const extractPageNumberFromLines = (lines) => {
-  for (const line of lines) {
-    const num = extractPageNumberFromLine(line);
-    if (num !== null) return num;
-  }
-  return null;
-};
-
-/**
- * Score how many consecutive pages in a number sequence increment by exactly 1.
- * Higher score = more consistent = more likely to be actual page numbers.
- */
-const scoreConsistency = (nums) => {
-  let score = 0;
-  for (let i = 1; i < nums.length; i++) {
-    if (nums[i] !== null && nums[i - 1] !== null && nums[i] === nums[i - 1] + 1) {
-      score++;
-    }
-  }
-  return score;
-};
-
-/**
- * Extract both full text and page-number candidates from every PDF page in a single pass.
- * Returns { pageTexts: string[], pageCandidates: { top: number|null, bottom: number|null }[] }
- */
-const extractAllPageData = async (pdfDoc, signal = null, logFn = null) => {
-  const pageTexts = [];      // 0-indexed: pageTexts[0] = PDF page 1
-  const pageCandidates = []; // 0-indexed: { top, bottom } for each page
-
-  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-    throwIfAborted(signal);
-    if (logFn && (pageNum % 50 === 0 || pageNum === 1)) {
-      logFn(`  Scanning page ${pageNum}/${pdfDoc.numPages}...`);
-    }
-
-    const page = await pdfDoc.getPage(pageNum);
-    const textContent = await page.getTextContent();
-
-    // Full text for title matching
-    pageTexts.push(textContent.items.map(item => item.str).join(' '));
-
-    // Group text items into lines by Y coordinate for page-number detection
-    const lineMap = new Map();
-    for (const item of textContent.items) {
-      const text = String(item.str || '').trim();
-      if (!text) continue;
-      const y = Math.round((item.transform?.[5] || 0) / 3) * 3;
-      if (!lineMap.has(y)) lineMap.set(y, []);
-      lineMap.get(y).push(text);
-    }
-
-    if (lineMap.size === 0) {
-      pageCandidates.push({ top: null, bottom: null });
-      continue;
-    }
-
-    // Sort Y values descending (top of page = high Y first)
-    const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
-
-    // Top area: first 2 lines (highest Y values)
-    const topLines = sortedYs.slice(0, 2)
-      .map(y => lineMap.get(y).join(' ').trim());
-
-    // Bottom area: last 2 lines (lowest Y values), reversed so outermost is first
-    const bottomLines = [...sortedYs.slice(-2)].reverse()
-      .map(y => lineMap.get(y).join(' ').trim());
-
-    pageCandidates.push({
-      top: extractPageNumberFromLines(topLines),
-      bottom: extractPageNumberFromLines(bottomLines)
-    });
-  }
-
-  return { pageTexts, pageCandidates };
-};
-
-/**
- * Build a mapping from printed page numbers to PDF page indices (0-based).
- * Determines whether page numbers are at the top or bottom of the page
- * by comparing sequence consistency.
- */
-const buildPageNumberMap = (pageCandidates, logFn = null) => {
-  const topNums = pageCandidates.map(c => c.top);
-  const bottomNums = pageCandidates.map(c => c.bottom);
-
-  const topScore = scoreConsistency(topNums);
-  const bottomScore = scoreConsistency(bottomNums);
-
-  const useTop = topScore > bottomScore;
-  const chosenNums = useTop ? topNums : bottomNums;
-  const position = useTop ? 'top' : 'bottom';
-
-  const printedToPdf = new Map(); // printedPageNumber → pdfPageIndex (0-based)
-  const pdfToPrinted = new Map(); // pdfPageIndex (0-based) → printedPageNumber
-
-  for (let i = 0; i < chosenNums.length; i++) {
-    const num = chosenNums[i];
-    if (num !== null && num > 0) {
-      // First occurrence wins in case of duplicates
-      if (!printedToPdf.has(num)) {
-        printedToPdf.set(num, i);
-      }
-      pdfToPrinted.set(i, num);
-    }
-  }
-
-  if (logFn) {
-    logFn(`[System] Page numbers detected at ${position} of pages (consistency: top=${topScore}, bottom=${bottomScore}). ${printedToPdf.size} pages mapped.`);
-  }
-
-  return { printedToPdf, pdfToPrinted, position };
 };
 
 // ===== Image Rendering (for image-based PDFs) =====
@@ -406,7 +246,7 @@ const openAICompatibleEndpoint = (baseUrl) => {
   return url.toString();
 };
 
-const callOpenAIChatCompletions = async ({ url, apiKey, model, providerName }, messages, { onChunk, signal }) => {
+const callOpenAIChatCompletions = async ({ url, apiKey, model, providerName }, messages, { onChunk, signal, maxOutputTokens }) => {
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
@@ -418,7 +258,10 @@ const callOpenAIChatCompletions = async ({ url, apiKey, model, providerName }, m
       messages,
       temperature: 1,
       response_format: { type: 'json_object' },
-      stream: true
+      stream: true,
+      ...(maxOutputTokens ? (providerName === 'OpenAI'
+        ? { max_completion_tokens: maxOutputTokens }
+        : { max_tokens: maxOutputTokens }) : {})
     }),
     signal
   });
@@ -471,7 +314,7 @@ const callOpenAIChatCompletions = async ({ url, apiKey, model, providerName }, m
   return full;
 };
 
-const callOllama = async (settings, messages, { onChunk, signal }) => {
+const callOllama = async (settings, messages, { onChunk, signal, maxOutputTokens }) => {
   const port = settings.ollamaPort || 11434;
   const response = await fetch(`http://localhost:${port}/api/chat`, {
     method: 'POST',
@@ -480,7 +323,8 @@ const callOllama = async (settings, messages, { onChunk, signal }) => {
       model: settings.ollamaModel,
       messages,
       stream: true,
-      format: 'json'
+      format: 'json',
+      ...(maxOutputTokens ? { options: { num_predict: maxOutputTokens } } : {})
     }),
     signal
   });
@@ -530,7 +374,7 @@ const callOllama = async (settings, messages, { onChunk, signal }) => {
   return full;
 };
 
-const callLLM = async (settings, { text, images }, { onChunk, signal }) => {
+const callLLM = async (settings, { text, images, systemPrompt = TOC_SYSTEM_PROMPT, userPrompt }, { onChunk, signal, maxOutputTokens }) => {
   const isVision = images && images.length > 0;
 
   if (settings.llmProvider === 'openai' || settings.llmProvider === 'openai-compatible') {
@@ -557,11 +401,11 @@ const callLLM = async (settings, { text, images }, { onChunk, signal }) => {
         }))
       ];
     } else {
-      userContent = TOC_TEXT_PROMPT + text;
+      userContent = userPrompt ?? TOC_TEXT_PROMPT + text;
     }
 
     const messages = [
-      { role: 'system', content: TOC_SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: userContent }
     ];
 
@@ -579,23 +423,23 @@ const callLLM = async (settings, { text, images }, { onChunk, signal }) => {
           providerName: 'OpenAI'
         };
 
-    return callOpenAIChatCompletions(connection, messages, { onChunk, signal });
+    return callOpenAIChatCompletions(connection, messages, { onChunk, signal, maxOutputTokens });
 
   } else if (settings.llmProvider === 'ollama') {
     let messages;
     if (isVision) {
       messages = [
-        { role: 'system', content: TOC_SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: TOC_VISION_PROMPT, images }
       ];
     } else {
       messages = [
-        { role: 'system', content: TOC_SYSTEM_PROMPT },
-        { role: 'user', content: TOC_TEXT_PROMPT + text }
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt ?? TOC_TEXT_PROMPT + text }
       ];
     }
 
-    return callOllama(settings, messages, { onChunk, signal });
+    return callOllama(settings, messages, { onChunk, signal, maxOutputTokens });
 
   } else {
     throw new Error(`Unknown LLM provider: ${settings.llmProvider}`);
@@ -656,219 +500,6 @@ const normalizeHierarchy = (entries) => {
   }
 
   return entries;
-};
-
-// ===== Page Matching =====
-
-const normalizeText = (text) => String(text || '')
-  .normalize('NFKD')
-  .replace(/[^a-zA-Z]/g, '')
-  .toLowerCase();
-
-const buildLetterBigrams = (text) => {
-  const cleaned = normalizeText(text);
-  if (cleaned.length < 2) return [];
-  const grams = [];
-  for (let i = 0; i < cleaned.length - 1; i++) {
-    grams.push(cleaned.slice(i, i + 2));
-  }
-  return grams;
-};
-
-const diceSimilarity = (left, right) => {
-  const a = buildLetterBigrams(left);
-  const b = buildLetterBigrams(right);
-  if (a.length === 0 || b.length === 0) return 0;
-
-  const counts = new Map();
-  a.forEach((gram) => counts.set(gram, (counts.get(gram) || 0) + 1));
-
-  let intersection = 0;
-  b.forEach((gram) => {
-    const current = counts.get(gram) || 0;
-    if (current > 0) {
-      intersection += 1;
-      counts.set(gram, current - 1);
-    }
-  });
-
-  return (2 * intersection) / (a.length + b.length);
-};
-
-const titleMatchesPage = (title, pageText) => {
-  const normTitle = normalizeText(title);
-  const normPage = normalizeText(pageText);
-
-  if (!normTitle || !normPage) return false;
-
-  // Direct substring match
-  if (normPage.includes(normTitle)) return true;
-
-  const stopWords = new Set([
-    'les', 'des', 'une', 'dans', 'pour', 'avec', 'sans', 'dont', 'entre', 'sous',
-    'sur', 'aux', 'du', 'de', 'la', 'le', 'et', 'ou', 'en', 'au', 'par', 'l', 'd',
-    'the', 'and', 'for', 'from', 'with', 'that', 'this'
-  ]);
-
-  const words = String(title || '')
-    .normalize('NFKD')
-    .replace(/[^a-zA-Z\s]/g, ' ')
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !stopWords.has(w));
-  const pageWordsBlob = String(pageText || '')
-    .normalize('NFKD')
-    .replace(/[^a-zA-Z\s]/g, ' ')
-    .toLowerCase();
-
-  if (words.length >= 2) {
-    const matchedWords = words.filter((w) => pageWordsBlob.includes(w)).length;
-    const coverage = matchedWords / words.length;
-    const minCoverage = words.length >= 6 ? 0.5 : 0.67;
-    if (coverage >= minCoverage) return true;
-  }
-
-  const pageTokens = pageWordsBlob.split(/\s+/).filter(Boolean);
-  const titleTokenCount = Math.max(1, String(title || '')
-    .normalize('NFKD')
-    .replace(/[^a-zA-Z\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean).length);
-
-  let best = 0;
-  for (let start = 0; start < pageTokens.length; start++) {
-    for (let span = Math.max(2, titleTokenCount - 6); span <= titleTokenCount + 8; span++) {
-      const end = start + span;
-      if (end > pageTokens.length) continue;
-      const windowText = pageTokens.slice(start, end).join(' ');
-      const score = diceSimilarity(title, windowText);
-      if (score > best) best = score;
-    }
-  }
-
-  const threshold = normTitle.length > 40 ? 0.78 : 0.88;
-  if (best >= threshold) return true;
-
-  return false;
-};
-
-/**
- * Check if a title matches on the target page or within a small distance.
- * Returns the matched page index, or null if no match.
- */
-const titleMatchesPageArea = (title, pageTexts, targetPageIdx, maxDistance = 1) => {
-  if (targetPageIdx >= 0 && targetPageIdx < pageTexts.length &&
-      titleMatchesPage(title, pageTexts[targetPageIdx])) {
-    return targetPageIdx;
-  }
-
-  for (let d = 1; d <= maxDistance; d++) {
-    const left = targetPageIdx - d;
-    const right = targetPageIdx + d;
-    if (left >= 0 && titleMatchesPage(title, pageTexts[left])) return left;
-    if (right < pageTexts.length && titleMatchesPage(title, pageTexts[right])) return right;
-  }
-
-  return null;
-};
-
-/**
- * Search for a title's text across a range of PDF pages.
- * Returns the first matching page index, or null.
- */
-const searchTitleInRange = (title, pageTexts, lowerBound, upperBound) => {
-  const start = Math.max(0, lowerBound);
-  const end = Math.min(pageTexts.length - 1, upperBound);
-  for (let i = start; i <= end; i++) {
-    if (titleMatchesPage(title, pageTexts[i])) return i;
-  }
-  return null;
-};
-
-/**
- * Two-pass matching of TOC entries against the PDF.
- *
- * Pass 1 – page-number lookup:
- *   For each entry whose printed page number is in the page map, look up the
- *   corresponding PDF page and check if the title text appears on it (or
- *   within ±2 pages to handle unnumbered chapter openers).
- *   • Title found  → verified  (black)
- *   • Title absent → uncertain (orange)
- *
- * Pass 2 – title search:
- *   For entries with no page match in the map, search for the title between
- *   the closest resolved neighbours.
- *   • Title found  → uncertain  (orange)
- *   • Title absent → unverified (red) – fall back to last known page
- */
-const matchEntriesAgainstPdf = (entries, pageTexts, printedToPdf, logFn) => {
-  const results = new Array(entries.length).fill(null);
-
-  // ---- Pass 1 ----
-  logFn('[System] Pass 1: matching entries by printed page number...');
-  let pass1Verified = 0;
-  let pass1Uncertain = 0;
-
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    if (entry.page <= 0 || !printedToPdf.has(entry.page)) continue;
-
-    const pdfPageIdx = printedToPdf.get(entry.page);
-    const titlePageIdx = titleMatchesPageArea(entry.title, pageTexts, pdfPageIdx, 2);
-
-    if (titlePageIdx !== null) {
-      results[i] = { pageIndex: titlePageIdx, confidence: 'verified' };
-      pass1Verified++;
-    } else {
-      results[i] = { pageIndex: pdfPageIdx, confidence: 'uncertain' };
-      pass1Uncertain++;
-    }
-  }
-
-  logFn(`[System] Pass 1 result: ${pass1Verified + pass1Uncertain}/${entries.length} resolved (${pass1Verified} verified, ${pass1Uncertain} uncertain).`);
-
-  // ---- Pass 2 ----
-  const unresolvedCount = results.filter(r => r === null).length;
-  if (unresolvedCount > 0) {
-    logFn(`[System] Pass 2: searching for ${unresolvedCount} remaining entries by title text...`);
-    let pass2Found = 0;
-    let pass2NotFound = 0;
-
-    for (let i = 0; i < entries.length; i++) {
-      if (results[i] !== null) continue;
-
-      // Determine search bounds from nearest resolved neighbours
-      let lowerBound = 0;
-      let upperBound = pageTexts.length - 1;
-
-      for (let j = i - 1; j >= 0; j--) {
-        if (results[j] !== null) {
-          lowerBound = results[j].pageIndex;
-          break;
-        }
-      }
-      for (let j = i + 1; j < entries.length; j++) {
-        if (results[j] !== null) {
-          upperBound = results[j].pageIndex;
-          break;
-        }
-      }
-
-      const found = searchTitleInRange(entries[i].title, pageTexts, lowerBound, upperBound);
-
-      if (found !== null) {
-        results[i] = { pageIndex: found, confidence: 'uncertain' };
-        pass2Found++;
-      } else {
-        results[i] = { pageIndex: Math.max(0, lowerBound), confidence: 'unverified' };
-        pass2NotFound++;
-      }
-    }
-
-    logFn(`[System] Pass 2 result: ${pass2Found} found by title, ${pass2NotFound} not found.`);
-  }
-
-  return results;
 };
 
 // ===== Main Import Flow =====
@@ -1055,17 +686,24 @@ const startImport = async () => {
     appendLogLine(`\n[System] Matching ${entries.length} entries against current PDF pages.`);
 
     appendLogLine('[System] Scanning all PDF pages for page numbers and text...');
-    const { pageTexts, pageCandidates } = await extractAllPageData(
-      state.pdf, signal, (msg) => appendLogLine(msg)
-    );
+    const matchResults = await detectPdfHeadings(state.pdf, entries, { signal, log: appendLogLine });
     throwIfAborted(signal);
-
-    const { printedToPdf } = buildPageNumberMap(pageCandidates, (msg) => appendLogLine(msg));
-
-    // Two-pass matching: page-number lookup then title search
-    const matchResults = matchEntriesAgainstPdf(
-      entries, pageTexts, printedToPdf, (msg) => appendLogLine(msg)
-    );
+    if (document.getElementById('tocAiHeadingMatch').checked) {
+      setStatus('Checking ambiguous heading candidates with AI...');
+      await refineHeadingsWithAi(entries, matchResults, {
+        signal,
+        log: appendLogLine,
+        request: async ({ text, systemPrompt, maxOutputTokens }) => {
+          startWaitingDots();
+          try {
+            return await callLLM(importSettings, { systemPrompt, userPrompt: text }, { signal, maxOutputTokens });
+          } finally {
+            stopWaitingDots();
+          }
+        }
+      });
+    }
+    throwIfAborted(signal);
 
     // Build outline items from match results
     const newOutline = entries.map((entry, i) => {

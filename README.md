@@ -89,39 +89,6 @@ npm run build:linux
 
 Built packages are output to the `dist/` directory.
 
-## 📁 Project Structure
-
-```
-pdf-toc-editor/
-├── src/
-│   ├── main/
-│   │   ├── main.js          # Electron main process
-│   │   └── preload.js       # (unused, kept for compatibility)
-│   ├── renderer/
-│   │   ├── index.html       # Application UI
-│   │   ├── styles.css       # Styling
-│   │   ├── renderer.js      # Main entry point
-│   │   ├── state.js         # Application state
-│   │   ├── history.js       # Undo/redo management
-│   │   ├── outline-actions.js    # Outline manipulation
-│   │   ├── outline-renderer.js   # Outline display
-│   │   ├── pdf-viewer.js    # PDF rendering
-│   │   ├── file-operations.js    # File I/O
-│   │   ├── context-menu.js  # Right-click menu
-│   │   ├── page-modal.js    # Page input dialog
-│   │   └── keyboard.js      # Keyboard shortcuts
-│   └── shared/
-│       └── outline.js       # PDF outline extraction/writing
-├── tests/
-│   └── outline.test.js      # Unit tests
-├── scripts/
-│   ├── download-fixture.js  # Test file downloader
-│   └── lint-config.js       # Configuration checker
-├── package.json
-├── CHANGELOG.md
-└── README.md
-```
-
 ## 🛠️ Technology Stack
 
 | Component | Technology |
@@ -140,11 +107,25 @@ pdf-toc-editor/
 
 3. **Saving**: pdf-lib rebuilds the outline tree from the flat array and writes it to the PDF's catalog with proper parent/child/sibling references.
 
+### Importing a table of contents
+
+Import a TOC from JSON, text, an external PDF, or selected pages of the current PDF. AI extracts the TOC when needed; JSON imports skip extraction. Heading matching scans the current PDF locally, uses printed page numbers and layout, and ignores TOC pages and repeated headers/watermarks. It handles split text fragments, multiline headings, accents, ligatures and hyphenation.
+
+Layout indexing and matching run in a background worker so the dialog remains responsive. Cancel stops the worker and preserves the current outline.
+
+Enable **Use AI to help match ambiguous headings** for an optional second step using the selected provider. It sends only locally shortlisted heading snippets, never the full PDF. Each import allows at most 3 requests, 18 KB of complete prompts total and 1,500 output tokens per request. Input tokens vary by model; the prompt limit is measured in UTF-8 bytes. For OpenAI, [the output cap includes reasoning tokens](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create). A rejected, truncated or failed AI response leaves the local results intact. No suitable candidates means no requests; AI suggestions remain orange for review.
+
+Black entries have strong local heading evidence. Orange entries need review (including missing parent sheets linked to their first available child). Red entries could not be located. A missing page is never reconstructed by extrapolating a global offset. Image-only body pages still need OCR before local heading matching can work; the optional step resolves text candidates rather than reading every page with vision.
+
+Use `npm version patch --no-git-tag-version` (or `minor`) for future version bumps so `package.json` and both root version fields in `package-lock.json` stay synchronized. `npm run lint` checks their names, versions and dependency metadata.
+
 ## 🧪 Running Tests
 
 ```bash
 npm test
 ```
+
+The George manual regression also runs when the supplied PDF and JSON are present in `tests/samples/`; it skips when those local files are absent. No tests call a paid AI provider.
 
 ## 📝 License
 

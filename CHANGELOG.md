@@ -2,6 +2,17 @@
 
 All notable changes to PDF Outline Editor are documented here.
 
+## [0.4.0] - Improved headings detection in PDF
+
+- Match TOC headings using PDF layout, joined small-cap fragments, multiline text and typography instead of scattered words across a page.
+- Detect printed folios above watermarks and handle reordered sections, missing sheets and bounded gaps without assuming a single page offset.
+- Exclude TOC pages and repeated margins from heading search. Missing parent headings point to their first available child and remain uncertain.
+- Run layout indexing and heading matching in a background worker, yield during source text extraction and terminate the worker on cancellation so the import dialog remains responsive.
+- Keep the AI checkbox inline with its label rather than inheriting full-width text-input styling.
+- Add optional AI matching of locally shortlisted heading snippets, limited to 3 requests, 18 KB of complete prompts and 1,500 output tokens per request. Validate returned candidates and quotes; retain local results on provider failure.
+- On the supplied George manual: 458 of 465 entries verified locally, 6 missing parent headings mapped to available children, 1 missing heading; zero AI requests.
+- Synchronize package/lockfile name, version and dependency metadata; check consistency in `npm run lint`.
+
 ## [0.3.2] - Adding OpenAI compatible endpoint
 
 ## [0.3.0] - Refactoring Release

@@ -1,6 +1,6 @@
 {
   "name": "pdf-outline-editor",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Desktop app to edit PDF outlines",
   "main": "src/main/main.js",
   "author": "Rafaël Jafferali",
@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "start": "electron .",
-    "test": "node tests/outline.test.js",
+    "test": "node --test tests/*.test.js",
     "download:fixture": "node scripts/download-fixture.js",
     "lint": "node scripts/lint-config.js",
     "build": "electron-builder",

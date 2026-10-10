@@ -212,6 +212,10 @@
           <label>Page range (e.g. 3-5 or 1,3-5,7):</label>
           <input type="text" id="tocPageRange" placeholder="3-5">
         </div>
+        <div class="import-field">
+          <label for="tocAiHeadingMatch" class="import-checkbox-label"><input type="checkbox" id="tocAiHeadingMatch"> Use AI to help match ambiguous headings</label>
+          <small>Optional: sends only shortlisted heading snippets to the selected provider. Maximum 3 requests, 18 KB of prompts total and 1,500 output tokens per request. AI suggestions stay orange for review.</small>
+        </div>
         <div id="tocImportStatus" class="import-status"></div>
         <div id="tocImportLog" class="import-log" aria-live="polite"></div>
         <div class="modal-actions">
